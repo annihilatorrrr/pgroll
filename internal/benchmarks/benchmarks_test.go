@@ -5,8 +5,12 @@ package benchmarks
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/lib/pq"
 	"github.com/oapi-codegen/nullable"
@@ -17,12 +21,37 @@ import (
 	"github.com/xataio/pgroll/pkg/roll"
 )
 
-const unitRowsPerSecond = "rows/s"
+const (
+	unitRowsPerSecond       = "rows/s"
+	unitExecutionsPerSecond = "executions/s"
+)
 
-var rowCounts = []int{10_000, 100_000, 300_000}
+var (
+	rowCounts = []int{10_000, 100_000, 300_000}
+	reports   = newReports()
+)
 
 func TestMain(m *testing.M) {
-	testutils.SharedTestMain(m)
+	testutils.SharedTestMain(m, func() (err error) {
+		// Only run in GitHub actions
+		if os.Getenv("GITHUB_ACTIONS") != "true" {
+			return nil
+		}
+
+		w, err := os.Create(fmt.Sprintf("benchmark_result_%s.json", getPostgresVersion()))
+		if err != nil {
+			return fmt.Errorf("creating report file: %w", err)
+		}
+		defer func() {
+			err = w.Close()
+		}()
+
+		encoder := json.NewEncoder(w)
+		if err := encoder.Encode(reports); err != nil {
+			return fmt.Errorf("encoding report file: %w", err)
+		}
+		return nil
+	})
 }
 
 func BenchmarkBackfill(b *testing.B) {
@@ -48,6 +77,8 @@ func BenchmarkBackfill(b *testing.B) {
 				b.Logf("Backfilled %d rows in %s", rowCount, b.Elapsed())
 				rowsPerSecond := float64(rowCount) / b.Elapsed().Seconds()
 				b.ReportMetric(rowsPerSecond, unitRowsPerSecond)
+
+				addRowsPerSecond(b, rowCount, rowsPerSecond)
 			})
 		})
 	}
@@ -87,6 +118,8 @@ func BenchmarkWriteAmplification(b *testing.B) {
 					b.StopTimer()
 					rowsPerSecond := float64(rowCount) / b.Elapsed().Seconds()
 					b.ReportMetric(rowsPerSecond, unitRowsPerSecond)
+
+					addRowsPerSecond(b, rowCount, rowsPerSecond)
 				})
 			})
 		}
@@ -116,9 +149,43 @@ func BenchmarkWriteAmplification(b *testing.B) {
 					b.StopTimer()
 					rowsPerSecond := float64(rowCount) / b.Elapsed().Seconds()
 					b.ReportMetric(rowsPerSecond, unitRowsPerSecond)
+
+					addRowsPerSecond(b, rowCount, rowsPerSecond)
 				})
 			})
 		}
+	})
+}
+
+func BenchmarkReadSchema(b *testing.B) {
+	ctx := context.Background()
+	testSchema := testutils.TestSchema()
+	var opts []roll.Option
+
+	testutils.WithMigratorInSchemaAndConnectionToContainerWithOptions(b, testSchema, opts, func(mig *roll.Roll, db *sql.DB) {
+		b.Cleanup(func() {
+			require.NoError(b, mig.Close())
+		})
+
+		setupInitialTable(b, ctx, testSchema, mig, db, 1)
+		b.ResetTimer()
+
+		// We don't want this benchmark to test the network so instead we run the actual function in a tight
+		// loop within a single execution.
+		executions := 10000
+		q := fmt.Sprintf(`SELECT %s.read_schema($1) FROM generate_series(1, $2);`, pq.QuoteIdentifier(mig.State().Schema()))
+		_, err := db.ExecContext(ctx, q, testSchema, executions)
+		b.StopTimer()
+		require.NoError(b, err)
+		perSecond := float64(executions) / b.Elapsed().Seconds()
+		b.ReportMetric(perSecond, unitExecutionsPerSecond)
+
+		reports.AddReport(BenchmarkReport{
+			Name:     b.Name(),
+			Unit:     unitExecutionsPerSecond,
+			RowCount: executions,
+			Result:   perSecond,
+		})
 	})
 }
 
@@ -149,6 +216,15 @@ func setupInitialTable(tb testing.TB, ctx context.Context, testSchema string, mi
 	seed(tb, rowCount, db)
 }
 
+func addRowsPerSecond(b *testing.B, rowCount int, perSecond float64) {
+	reports.AddReport(BenchmarkReport{
+		Name:     b.Name(),
+		Unit:     unitRowsPerSecond,
+		RowCount: rowCount,
+		Result:   perSecond,
+	})
+}
+
 // Simple table with a nullable `name` field.
 var migCreateTable = migrations.Migration{
 	Name: "01_create_table",
@@ -159,13 +235,13 @@ var migCreateTable = migrations.Migration{
 				{
 					Name: "id",
 					Type: "serial",
-					Pk:   ptr(true),
+					Pk:   true,
 				},
 				{
 					Name:     "name",
 					Type:     "varchar(255)",
-					Nullable: ptr(true),
-					Unique:   ptr(false),
+					Nullable: true,
+					Unique:   false,
 				},
 			},
 		},
@@ -180,7 +256,7 @@ var migAlterColumn = migrations.Migration{
 		&migrations.OpAlterColumn{
 			Table:    "users",
 			Column:   "name",
-			Up:       "(SELECT CASE WHEN name IS NULL THEN 'placeholder' ELSE name END)",
+			Up:       "SELECT CASE WHEN name IS NULL THEN 'placeholder' ELSE name END",
 			Down:     "user_name",
 			Comment:  nullable.NewNullableWithValue("the name of the user"),
 			Nullable: ptr(false),
@@ -189,3 +265,34 @@ var migAlterColumn = migrations.Migration{
 }
 
 func ptr[T any](x T) *T { return &x }
+
+func getPostgresVersion() string {
+	return os.Getenv("POSTGRES_VERSION")
+}
+
+func newReports() *BenchmarkReports {
+	return &BenchmarkReports{
+		GitSHA:          os.Getenv("GITHUB_SHA"),
+		PostgresVersion: getPostgresVersion(),
+		Timestamp:       time.Now().Unix(),
+		Reports:         []BenchmarkReport{},
+	}
+}
+
+type BenchmarkReports struct {
+	GitSHA          string
+	PostgresVersion string
+	Timestamp       int64
+	Reports         []BenchmarkReport
+}
+
+func (r *BenchmarkReports) AddReport(report BenchmarkReport) {
+	r.Reports = append(r.Reports, report)
+}
+
+type BenchmarkReport struct {
+	Name     string
+	RowCount int
+	Unit     string
+	Result   float64
+}

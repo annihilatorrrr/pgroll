@@ -54,6 +54,24 @@ func (e ColumnDoesNotExistError) Error() string {
 	return fmt.Sprintf("column %q does not exist on table %q", e.Name, e.Table)
 }
 
+type ColumnMigrationMissingError struct {
+	Table string
+	Name  string
+}
+
+func (e ColumnMigrationMissingError) Error() string {
+	return fmt.Sprintf("migration for column %q in %q is missing", e.Name, e.Table)
+}
+
+type ColumnMigrationRedundantError struct {
+	Table string
+	Name  string
+}
+
+func (e ColumnMigrationRedundantError) Error() string {
+	return fmt.Sprintf("migration for column %q in %q is redundant", e.Name, e.Table)
+}
+
 type ColumnIsNotNullableError struct {
 	Table string
 	Name  string
@@ -222,4 +240,13 @@ func ValidateIdentifierLength(name string) error {
 		return InvalidIdentifierLengthError{Name: name}
 	}
 	return nil
+}
+
+type MultiColumnConstraintsNotSupportedError struct {
+	Table      string
+	Constraint string
+}
+
+func (e MultiColumnConstraintsNotSupportedError) Error() string {
+	return fmt.Sprintf("constraint %q on table %q applies to multiple columns", e.Constraint, e.Table)
 }

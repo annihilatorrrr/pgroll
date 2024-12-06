@@ -9,6 +9,7 @@ import (
 	"github.com/xataio/pgroll/internal/testutils"
 
 	"github.com/stretchr/testify/assert"
+
 	"github.com/xataio/pgroll/pkg/migrations"
 )
 
@@ -28,7 +29,7 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -48,7 +49,7 @@ func TestDropConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -57,10 +58,9 @@ func TestDropConstraint(t *testing.T) {
 					Name: "03_drop_check_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "title",
-							Name:   "check_title_length",
-							Down:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Table: "posts",
+							Name:  "check_title_length",
+							Down:  "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 						},
 					},
 				},
@@ -106,18 +106,8 @@ func TestDropConstraint(t *testing.T) {
 				}, rows)
 			},
 			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
-				// The new (temporary) `title` column should not exist on the underlying table.
-				ColumnMustNotExist(t, db, schema, "posts", migrations.TemporaryName("title"))
-
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", "title"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", migrations.TemporaryName("title")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", "title"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", migrations.TemporaryName("title")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "posts", "title")
 			},
 			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
 				// Inserting a row that does not meet the check constraint into the new view works.
@@ -134,15 +124,8 @@ func TestDropConstraint(t *testing.T) {
 					{"id": 5, "title": "e"},
 				}, rows)
 
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", "title"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", migrations.TemporaryName("title")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", "title"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", migrations.TemporaryName("title")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "posts", "title")
 			},
 		},
 		{
@@ -157,7 +140,7 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -177,7 +160,7 @@ func TestDropConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -186,11 +169,10 @@ func TestDropConstraint(t *testing.T) {
 					Name: "03_drop_check_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "title",
-							Name:   "check_title_length",
-							Up:     "title || '!'",
-							Down:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Table: "posts",
+							Name:  "check_title_length",
+							Up:    "title || '!'",
+							Down:  "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 						},
 					},
 				},
@@ -223,7 +205,7 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -237,7 +219,7 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -246,7 +228,7 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name:     "user_id",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -263,7 +245,7 @@ func TestDropConstraint(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -272,11 +254,10 @@ func TestDropConstraint(t *testing.T) {
 					Name: "03_drop_fk_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "user_id",
-							Name:   "fk_users_id",
-							Up:     "user_id",
-							Down:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Table: "posts",
+							Name:  "fk_users_id",
+							Up:    "user_id",
+							Down:  "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 						},
 					},
 				},
@@ -334,18 +315,8 @@ func TestDropConstraint(t *testing.T) {
 				}, rows)
 			},
 			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
-				// The new (temporary) `user_id` column should not exist on the underlying table.
-				ColumnMustNotExist(t, db, schema, "posts", migrations.TemporaryName("user_id"))
-
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", "user_id"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", migrations.TemporaryName("user_id")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", "user_id"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", migrations.TemporaryName("user_id")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "posts", "user_id")
 			},
 			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
 				// The new (temporary) `user_id` column should not exist on the underlying table.
@@ -366,15 +337,8 @@ func TestDropConstraint(t *testing.T) {
 					{"id": 5, "title": "another post by an unknown user", "user_id": 4},
 				}, rows)
 
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", "user_id"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", migrations.TemporaryName("user_id")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", "user_id"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", migrations.TemporaryName("user_id")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "posts", "user_id")
 			},
 		},
 		{
@@ -389,12 +353,12 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:   "name",
 									Type:   "text",
-									Unique: ptr(true),
+									Unique: true,
 								},
 							},
 						},
@@ -404,11 +368,10 @@ func TestDropConstraint(t *testing.T) {
 					Name: "02_drop_unique_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "users",
-							Column: "name",
-							Name:   "_pgroll_new_users_name_key",
-							Up:     "name",
-							Down:   "name || '-' || (random()*1000000)::integer",
+							Table: "users",
+							Name:  "_pgroll_new_users_name_key",
+							Up:    "name",
+							Down:  "name || '-' || (random()*1000000)::integer",
 						},
 					},
 				},
@@ -433,22 +396,12 @@ func TestDropConstraint(t *testing.T) {
 				})
 			},
 			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
-				// The new (temporary) `name` column should not exist on the underlying table.
-				ColumnMustNotExist(t, db, schema, "users", migrations.TemporaryName("name"))
-
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("users", "name"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("users", migrations.TemporaryName("name")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "users", migrations.TriggerName("users", "name"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "users", migrations.TriggerName("users", migrations.TemporaryName("name")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "users", "name")
 			},
 			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
-				// The new (temporary) `name` column should not exist on the underlying table.
-				ColumnMustNotExist(t, db, schema, "users", migrations.TemporaryName("name"))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "users", "name")
 
 				// Inserting a row that does not meet the unique constraint into the new view works.
 				MustInsert(t, db, schema, "02_drop_unique_constraint", "users", map[string]string{
@@ -468,12 +421,12 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:    "name",
 									Type:    "text",
-									Unique:  ptr(true),
+									Unique:  true,
 									Default: ptr("'anonymous'"),
 								},
 							},
@@ -484,11 +437,10 @@ func TestDropConstraint(t *testing.T) {
 					Name: "02_drop_unique_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "users",
-							Column: "name",
-							Name:   "_pgroll_new_users_name_key",
-							Up:     "name",
-							Down:   "name || '-' || (random()*1000000)::integer",
+							Table: "users",
+							Name:  "_pgroll_new_users_name_key",
+							Up:    "name",
+							Down:  "name || '-' || (random()*1000000)::integer",
 						},
 					},
 				},
@@ -539,12 +491,12 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},
@@ -559,17 +511,17 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name:   "department_id",
 									Type:   "integer",
-									Unique: ptr(true),
+									Unique: true,
 									References: &migrations.ForeignKeyReference{
 										Name:   "fk_employee_department",
 										Table:  "departments",
@@ -584,11 +536,10 @@ func TestDropConstraint(t *testing.T) {
 					Name: "03_drop_unique_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "employees",
-							Column: "department_id",
-							Name:   "_pgroll_new_employees_department_id_key",
-							Up:     "department_id",
-							Down:   "department_id",
+							Table: "employees",
+							Name:  "_pgroll_new_employees_department_id_key",
+							Up:    "department_id",
+							Down:  "department_id",
 						},
 					},
 				},
@@ -616,13 +567,13 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "title",
 									Type:     "text",
-									Nullable: ptr(true),
-									Unique:   ptr(true),
+									Nullable: true,
+									Unique:   true,
 								},
 							},
 						},
@@ -638,7 +589,7 @@ func TestDropConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -647,11 +598,10 @@ func TestDropConstraint(t *testing.T) {
 					Name: "03_drop_unique_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "title",
-							Name:   "_pgroll_new_posts_title_key",
-							Up:     "title",
-							Down:   "title",
+							Table: "posts",
+							Name:  "_pgroll_new_posts_title_key",
+							Up:    "title",
+							Down:  "title",
 						},
 					},
 				},
@@ -685,12 +635,12 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "title",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -718,7 +668,7 @@ func TestDropConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -727,11 +677,10 @@ func TestDropConstraint(t *testing.T) {
 					Name: "04_drop_check_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "title",
-							Name:   "check_title_length",
-							Up:     "title",
-							Down:   "title",
+							Table: "posts",
+							Name:  "check_title_length",
+							Up:    "title",
+							Down:  "title",
 						},
 					},
 				},
@@ -776,13 +725,13 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "title",
 									Type:     "text",
-									Unique:   ptr(true),
-									Nullable: ptr(false),
+									Unique:   true,
+									Nullable: false,
 								},
 							},
 						},
@@ -792,11 +741,10 @@ func TestDropConstraint(t *testing.T) {
 					Name: "02_drop_unique_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "title",
-							Name:   "_pgroll_new_posts_title_key",
-							Up:     "title",
-							Down:   "title",
+							Table: "posts",
+							Name:  "_pgroll_new_posts_title_key",
+							Up:    "title",
+							Down:  "title",
 						},
 					},
 				},
@@ -828,13 +776,13 @@ func TestDropConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "title",
 									Type:     "text",
-									Unique:   ptr(true),
-									Nullable: ptr(false),
+									Unique:   true,
+									Nullable: false,
 									Comment:  ptr("the title of the post"),
 								},
 							},
@@ -845,11 +793,10 @@ func TestDropConstraint(t *testing.T) {
 					Name: "02_drop_unique_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "title",
-							Name:   "_pgroll_new_posts_title_key",
-							Up:     "title",
-							Down:   "title",
+							Table: "posts",
+							Name:  "_pgroll_new_posts_title_key",
+							Up:    "title",
+							Down:  "title",
 						},
 					},
 				},
@@ -880,7 +827,7 @@ func TestDropConstraintValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name: "title",
@@ -900,7 +847,7 @@ func TestDropConstraintValidation(t *testing.T) {
 					Name:       "check_title_length",
 					Constraint: "length(title) > 3",
 				},
-				Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+				Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 				Down: "title",
 			},
 		},
@@ -916,36 +863,15 @@ func TestDropConstraintValidation(t *testing.T) {
 					Name: "03_drop_check_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "doesntexist",
-							Column: "title",
-							Name:   "check_title_length",
-							Up:     "title",
-							Down:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Table: "doesntexist",
+							Name:  "check_title_length",
+							Up:    "title",
+							Down:  "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 						},
 					},
 				},
 			},
 			wantStartErr: migrations.TableDoesNotExistError{Name: "doesntexist"},
-		},
-		{
-			name: "column must exist",
-			migrations: []migrations.Migration{
-				createTableMigration,
-				addCheckMigration,
-				{
-					Name: "03_drop_check_constraint",
-					Operations: migrations.Operations{
-						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "doesntexist",
-							Name:   "check_title_length",
-							Up:     "title",
-							Down:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
-						},
-					},
-				},
-			},
-			wantStartErr: migrations.ColumnDoesNotExistError{Table: "posts", Name: "doesntexist"},
 		},
 		{
 			name: "constraint must exist",
@@ -956,11 +882,10 @@ func TestDropConstraintValidation(t *testing.T) {
 					Name: "03_drop_check_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "title",
-							Name:   "doesntexist",
-							Up:     "title",
-							Down:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Table: "posts",
+							Name:  "doesntexist",
+							Up:    "title",
+							Down:  "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 						},
 					},
 				},
@@ -976,10 +901,9 @@ func TestDropConstraintValidation(t *testing.T) {
 					Name: "03_drop_check_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "title",
-							Up:     "title",
-							Down:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Table: "posts",
+							Up:    "title",
+							Down:  "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 						},
 					},
 				},
@@ -995,10 +919,9 @@ func TestDropConstraintValidation(t *testing.T) {
 					Name: "03_drop_check_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpDropConstraint{
-							Table:  "posts",
-							Column: "title",
-							Name:   "check_title_length",
-							Up:     "title",
+							Table: "posts",
+							Name:  "check_title_length",
+							Up:    "title",
 						},
 					},
 				},

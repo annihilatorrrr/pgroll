@@ -73,6 +73,7 @@ jobs:
 
       - name: Generate types
         run: |
+          chmod 666 pkg/state/init.sql
           make generate
 
       - name: Ensure generated types are up-to-date
@@ -83,6 +84,24 @@ jobs:
             exit 1
           fi
 
+  check-ledger:
+    name: check ledger
+    runs-on: ubuntu-latest
+    steps:
+     - uses: actions/checkout@v4
+
+     - name: Generate ledger
+       run: |
+         make ledger
+
+     - name: Ensure ledger is up to date
+       run: |
+         if ! git diff --quiet; then
+           echo "generated ledger is out of date!"
+           echo "run 'make ledger' to regenerate the ledger"
+           exit 1
+         fi
+         
   dead-code-check:
     name: dead code check
     runs-on: ubuntu-latest
