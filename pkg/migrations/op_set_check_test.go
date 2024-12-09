@@ -28,7 +28,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -48,7 +48,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -98,21 +98,8 @@ func TestSetCheckConstraint(t *testing.T) {
 				}, rows)
 			},
 			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
-				// The new (temporary) `title` column should not exist on the underlying table.
-				ColumnMustNotExist(t, db, schema, "posts", migrations.TemporaryName("title"))
-
-				// The check constraint no longer exists.
-				CheckConstraintMustNotExist(t, db, schema, "posts", "check_title_length")
-
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", "title"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", migrations.TemporaryName("title")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", "title"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", migrations.TemporaryName("title")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "posts", "title")
 			},
 			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
 				// The check constraint exists on the new table.
@@ -160,7 +147,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:    "title",
@@ -181,7 +168,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -227,12 +214,12 @@ func TestSetCheckConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},
@@ -247,17 +234,17 @@ func TestSetCheckConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name:     "department_id",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 									References: &migrations.ForeignKeyReference{
 										Name:     "fk_employee_department",
 										Table:    "departments",
@@ -279,7 +266,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								Name:       "check_valid_department_id",
 								Constraint: "department_id > 1",
 							},
-							Up:   "(SELECT CASE WHEN department_id <= 1 THEN 2 ELSE department_id END)",
+							Up:   "SELECT CASE WHEN department_id <= 1 THEN 2 ELSE department_id END",
 							Down: "department_id",
 						},
 					},
@@ -308,7 +295,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -336,7 +323,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								Name:       "check_body_length",
 								Constraint: "length(body) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(body) <= 3 THEN LPAD(body, 4, '-') ELSE body END)",
+							Up:   "SELECT CASE WHEN length(body) <= 3 THEN LPAD(body, 4, '-') ELSE body END",
 							Down: "body",
 						},
 					},
@@ -373,12 +360,12 @@ func TestSetCheckConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "title",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},
@@ -394,7 +381,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -427,7 +414,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -459,7 +446,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -505,7 +492,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:    "title",
@@ -526,7 +513,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -555,7 +542,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -575,7 +562,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -590,7 +577,7 @@ func TestSetCheckConstraint(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -619,7 +606,7 @@ func TestSetCheckConstraintValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name: "title",
@@ -644,7 +631,7 @@ func TestSetCheckConstraintValidation(t *testing.T) {
 							Check: &migrations.CheckConstraint{
 								Constraint: "length(title) > 3",
 							},
-							Up:   "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up:   "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 							Down: "title",
 						},
 					},
@@ -687,7 +674,7 @@ func TestSetCheckConstraintValidation(t *testing.T) {
 								Name:       "check_title_length",
 								Constraint: "length(title) > 3",
 							},
-							Up: "(SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END)",
+							Up: "SELECT CASE WHEN length(title) <= 3 THEN LPAD(title, 4, '-') ELSE title END",
 						},
 					},
 				},

@@ -24,6 +24,8 @@ const (
 	DefaultBackfillDelay     time.Duration = 0
 )
 
+var ErrMismatchedMigration = fmt.Errorf("remote migration does not match local migration")
+
 type Roll struct {
 	pgConn db.DB
 
@@ -43,6 +45,7 @@ type Roll struct {
 
 	backfillBatchSize  int
 	backfillBatchDelay time.Duration
+	skipValidation     bool
 }
 
 // New creates a new Roll instance
@@ -84,6 +87,7 @@ func New(ctx context.Context, pgURL, schema string, state *state.State, opts ...
 		migrationHooks:           rollOpts.migrationHooks,
 		backfillBatchSize:        rollOpts.backfillBatchSize,
 		backfillBatchDelay:       rollOpts.backfillBatchDelay,
+		skipValidation:           rollOpts.skipValidation,
 	}, nil
 }
 
@@ -140,6 +144,11 @@ func (m *Roll) PGVersion() PGVersion {
 // PgConn returns the underlying database connection
 func (m *Roll) PgConn() db.DB {
 	return m.pgConn
+}
+
+// State returns the state instance the Roll instance is acting on
+func (m *Roll) State() *state.State {
+	return m.state
 }
 
 // Schema returns the schema the Roll instance is acting on

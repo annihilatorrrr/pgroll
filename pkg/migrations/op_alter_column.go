@@ -151,12 +151,12 @@ func (o *OpAlterColumn) Complete(ctx context.Context, conn db.DB, tr SQLTransfor
 	return nil
 }
 
-func (o *OpAlterColumn) Rollback(ctx context.Context, conn db.DB, tr SQLTransformer) error {
+func (o *OpAlterColumn) Rollback(ctx context.Context, conn db.DB, tr SQLTransformer, s *schema.Schema) error {
 	ops := o.subOperations()
 
 	// Perform any operation specific rollback steps
 	for _, ops := range ops {
-		if err := ops.Rollback(ctx, conn, tr); err != nil {
+		if err := ops.Rollback(ctx, conn, tr, nil); err != nil {
 			return err
 		}
 	}
@@ -302,11 +302,17 @@ func (o *OpAlterColumn) subOperations() []Operation {
 			Down:   o.Down,
 		})
 	}
-	if o.Default != nil {
+	if o.Default.IsSpecified() {
+		// o.Default is either a valid value or `null`.
+		var defaultPtr *string
+		if d, err := o.Default.Get(); err == nil {
+			defaultPtr = &d
+		}
+
 		ops = append(ops, &OpSetDefault{
 			Table:   o.Table,
 			Column:  o.Column,
-			Default: *o.Default,
+			Default: defaultPtr,
 			Up:      o.Up,
 			Down:    o.Down,
 		})
@@ -336,9 +342,9 @@ func duplicatorForOperations(ops []Operation, conn db.DB, table *schema.Table, c
 	for _, op := range ops {
 		switch op := (op).(type) {
 		case *OpDropNotNull:
-			d = d.WithoutNotNull()
+			d = d.WithoutNotNull(column.Name)
 		case *OpChangeType:
-			d = d.WithType(op.Type)
+			d = d.WithType(column.Name, op.Type)
 		}
 	}
 	return d

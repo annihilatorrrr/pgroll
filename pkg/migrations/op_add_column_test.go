@@ -30,12 +30,12 @@ func TestAddColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:   "name",
 									Type:   "varchar(255)",
-									Unique: ptr(true),
+									Unique: true,
 								},
 							},
 						},
@@ -49,7 +49,7 @@ func TestAddColumn(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "age",
 								Type:     "integer",
-								Nullable: ptr(false),
+								Nullable: false,
 								Default:  ptr("0"),
 								Comment:  ptr("the age of the user"),
 							},
@@ -141,8 +141,8 @@ func TestAddColumn(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "description",
 								Type:     "integer",
-								Nullable: ptr(false),
-								Unique:   ptr(true),
+								Nullable: false,
+								Unique:   true,
 							},
 							Up: "'this is a description'",
 						},
@@ -163,12 +163,12 @@ func TestAddColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:   "name",
 									Type:   "varchar(255)",
-									Unique: ptr(true),
+									Unique: true,
 								},
 							},
 						},
@@ -182,7 +182,7 @@ func TestAddColumn(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "counter_smallserial",
 								Type:     "smallserial",
-								Nullable: ptr(false),
+								Nullable: false,
 							},
 						},
 						&migrations.OpAddColumn{
@@ -190,14 +190,14 @@ func TestAddColumn(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "counter_serial",
 								Type:     "serial",
-								Nullable: ptr(false),
+								Nullable: false,
 							},
 						}, &migrations.OpAddColumn{
 							Table: "users",
 							Column: migrations.Column{
 								Name:     "counter_bigserial",
 								Type:     "bigserial",
-								Nullable: ptr(false),
+								Nullable: false,
 							},
 						},
 					},
@@ -273,12 +273,12 @@ func TestAddForeignKeyColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:   "name",
 									Type:   "varchar(255)",
-									Unique: ptr(true),
+									Unique: true,
 								},
 							},
 						},
@@ -288,7 +288,7 @@ func TestAddForeignKeyColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "quantity",
@@ -311,7 +311,7 @@ func TestAddForeignKeyColumn(t *testing.T) {
 									Table:  "users",
 									Column: "id",
 								},
-								Nullable: ptr(true),
+								Nullable: true,
 							},
 						},
 					},
@@ -375,12 +375,12 @@ func TestAddForeignKeyColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:   "name",
 									Type:   "varchar(255)",
-									Unique: ptr(true),
+									Unique: true,
 								},
 							},
 						},
@@ -390,7 +390,7 @@ func TestAddForeignKeyColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "quantity",
@@ -413,7 +413,7 @@ func TestAddForeignKeyColumn(t *testing.T) {
 									Table:  "users",
 									Column: "id",
 								},
-								Nullable: ptr(false),
+								Nullable: false,
 							},
 							Up: "1",
 						},
@@ -478,7 +478,7 @@ func TestAddForeignKeyColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -492,7 +492,7 @@ func TestAddForeignKeyColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "quantity",
@@ -510,7 +510,7 @@ func TestAddForeignKeyColumn(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "user_id",
 								Type:     "integer",
-								Nullable: ptr(true),
+								Nullable: true,
 								References: &migrations.ForeignKeyReference{
 									Name:   "fk_users_id",
 									Table:  "users",
@@ -589,7 +589,7 @@ func TestAddForeignKeyColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -603,7 +603,7 @@ func TestAddForeignKeyColumn(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "quantity",
@@ -621,12 +621,12 @@ func TestAddForeignKeyColumn(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "user_id",
 								Type:     "integer",
-								Nullable: ptr(true),
+								Nullable: true,
 								References: &migrations.ForeignKeyReference{
 									Name:     "fk_users_id",
 									Table:    "users",
 									Column:   "id",
-									OnDelete: "CASCADE",
+									OnDelete: migrations.ForeignKeyReferenceOnDeleteCASCADE,
 								},
 							},
 						},
@@ -716,12 +716,12 @@ func TestAddColumnWithUpSql(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:   "name",
 									Type:   "varchar(255)",
-									Unique: ptr(true),
+									Unique: true,
 								},
 							},
 						},
@@ -736,7 +736,7 @@ func TestAddColumnWithUpSql(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "description",
 								Type:     "varchar(255)",
-								Nullable: ptr(true),
+								Nullable: true,
 							},
 						},
 					},
@@ -787,6 +787,170 @@ func TestAddColumnWithUpSql(t *testing.T) {
 			},
 		},
 		{
+			name: "add column with up sql missing parentheses",
+			migrations: []migrations.Migration{
+				{
+					Name: "01_add_table",
+					Operations: migrations.Operations{
+						&migrations.OpCreateTable{
+							Name: "products",
+							Columns: []migrations.Column{
+								{
+									Name: "id",
+									Type: "serial",
+									Pk:   true,
+								},
+								{
+									Name:   "name",
+									Type:   "varchar(255)",
+									Unique: true,
+								},
+							},
+						},
+					},
+				},
+				{
+					Name: "02_add_column",
+					Operations: migrations.Operations{
+						&migrations.OpAddColumn{
+							Table: "products",
+							Up:    "select name",
+							Column: migrations.Column{
+								Name:     "description",
+								Type:     "varchar(255)",
+								Nullable: true,
+							},
+						},
+					},
+				},
+			},
+			afterStart: func(t *testing.T, db *sql.DB, schema string) {
+				// inserting via both the old and the new views works
+				MustInsert(t, db, schema, "01_add_table", "products", map[string]string{
+					"name": "apple",
+				})
+				MustInsert(t, db, schema, "02_add_column", "products", map[string]string{
+					"name":        "banana",
+					"description": "a yellow banana",
+				})
+
+				res := MustSelect(t, db, schema, "02_add_column", "products")
+				assert.Equal(t, []map[string]any{
+					// the description column has been populated for the product inserted into the old view.
+					{"id": 1, "name": "apple", "description": "apple"},
+					// the description column for the product inserted into the new view is as inserted.
+					{"id": 2, "name": "banana", "description": "a yellow banana"},
+				}, res)
+			},
+			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
+				// The trigger function has been dropped.
+				triggerFnName := migrations.TriggerFunctionName("products", "description")
+				FunctionMustNotExist(t, db, schema, triggerFnName)
+
+				// The trigger has been dropped.
+				triggerName := migrations.TriggerName("products", "description")
+				TriggerMustNotExist(t, db, schema, "products", triggerName)
+			},
+			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
+				// after rollback + restart + complete, all 'description' values are the backfilled ones.
+				res := MustSelect(t, db, schema, "02_add_column", "products")
+				assert.Equal(t, []map[string]any{
+					{"id": 1, "name": "apple", "description": "apple"},
+					{"id": 2, "name": "banana", "description": "banana"},
+				}, res)
+
+				// The trigger function has been dropped.
+				triggerFnName := migrations.TriggerFunctionName("products", "description")
+				FunctionMustNotExist(t, db, schema, triggerFnName)
+
+				// The trigger has been dropped.
+				triggerName := migrations.TriggerName("products", "description")
+				TriggerMustNotExist(t, db, schema, "products", triggerName)
+			},
+		},
+		{
+			name: "add column with up sql missing parentheses, no select",
+			migrations: []migrations.Migration{
+				{
+					Name: "01_add_table",
+					Operations: migrations.Operations{
+						&migrations.OpCreateTable{
+							Name: "products",
+							Columns: []migrations.Column{
+								{
+									Name: "id",
+									Type: "serial",
+									Pk:   true,
+								},
+								{
+									Name:   "name",
+									Type:   "varchar(255)",
+									Unique: true,
+								},
+							},
+						},
+					},
+				},
+				{
+					Name: "02_add_column",
+					Operations: migrations.Operations{
+						&migrations.OpAddColumn{
+							Table: "products",
+							Up:    "name",
+							Column: migrations.Column{
+								Name:     "description",
+								Type:     "varchar(255)",
+								Nullable: true,
+							},
+						},
+					},
+				},
+			},
+			afterStart: func(t *testing.T, db *sql.DB, schema string) {
+				// inserting via both the old and the new views works
+				MustInsert(t, db, schema, "01_add_table", "products", map[string]string{
+					"name": "apple",
+				})
+				MustInsert(t, db, schema, "02_add_column", "products", map[string]string{
+					"name":        "banana",
+					"description": "a yellow banana",
+				})
+
+				res := MustSelect(t, db, schema, "02_add_column", "products")
+				assert.Equal(t, []map[string]any{
+					// the description column has been populated for the product inserted into the old view.
+					{"id": 1, "name": "apple", "description": "apple"},
+					// the description column for the product inserted into the new view is as inserted.
+					{"id": 2, "name": "banana", "description": "a yellow banana"},
+				}, res)
+			},
+			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
+				// The trigger function has been dropped.
+				triggerFnName := migrations.TriggerFunctionName("products", "description")
+				FunctionMustNotExist(t, db, schema, triggerFnName)
+
+				// The trigger has been dropped.
+				triggerName := migrations.TriggerName("products", "description")
+				TriggerMustNotExist(t, db, schema, "products", triggerName)
+			},
+			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
+				// after rollback + restart + complete, all 'description' values are the backfilled ones.
+				res := MustSelect(t, db, schema, "02_add_column", "products")
+				assert.Equal(t, []map[string]any{
+					{"id": 1, "name": "apple", "description": "apple"},
+					{"id": 2, "name": "banana", "description": "banana"},
+				}, res)
+
+				// The trigger function has been dropped.
+				triggerFnName := migrations.TriggerFunctionName("products", "description")
+				FunctionMustNotExist(t, db, schema, triggerFnName)
+
+				// The trigger has been dropped.
+				triggerName := migrations.TriggerName("products", "description")
+				TriggerMustNotExist(t, db, schema, "products", triggerName)
+			},
+		},
+		{
 			name: "add column with up sql and a text pk",
 			migrations: []migrations.Migration{
 				{
@@ -798,12 +962,12 @@ func TestAddColumnWithUpSql(t *testing.T) {
 								{
 									Name: "id",
 									Type: "text",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:   "name",
 									Type:   "varchar(255)",
-									Unique: ptr(true),
+									Unique: true,
 								},
 							},
 						},
@@ -818,7 +982,7 @@ func TestAddColumnWithUpSql(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "description",
 								Type:     "varchar(255)",
-								Nullable: ptr(true),
+								Nullable: true,
 							},
 						},
 					},
@@ -886,8 +1050,8 @@ func TestAddColumnWithUpSql(t *testing.T) {
 								{
 									Name:     "name",
 									Type:     "varchar(255)",
-									Unique:   ptr(true),
-									Nullable: ptr(false),
+									Unique:   true,
+									Nullable: false,
 								},
 							},
 						},
@@ -907,7 +1071,7 @@ func TestAddColumnWithUpSql(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "description",
 								Type:     "varchar(255)",
-								Nullable: ptr(true),
+								Nullable: true,
 							},
 						},
 					},
@@ -981,12 +1145,12 @@ func TestAddNotNullColumnWithNoDefault(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:   "name",
 									Type:   "varchar(255)",
-									Unique: ptr(true),
+									Unique: true,
 								},
 							},
 						},
@@ -1001,7 +1165,7 @@ func TestAddNotNullColumnWithNoDefault(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "description",
 								Type:     "varchar(255)",
-								Nullable: ptr(false),
+								Nullable: false,
 							},
 						},
 					},
@@ -1048,12 +1212,12 @@ func TestAddColumnValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name:   "name",
 						Type:   "varchar(255)",
-						Unique: ptr(true),
+						Unique: true,
 					},
 				},
 			},
@@ -1073,8 +1237,8 @@ func TestAddColumnValidation(t *testing.T) {
 					{
 						Name:     "name",
 						Type:     "varchar(255)",
-						Unique:   ptr(true),
-						Nullable: ptr(true),
+						Unique:   true,
+						Nullable: true,
 					},
 				},
 			},
@@ -1094,8 +1258,8 @@ func TestAddColumnValidation(t *testing.T) {
 					{
 						Name:     "name",
 						Type:     "varchar(255)",
-						Unique:   ptr(true),
-						Nullable: ptr(false),
+						Unique:   true,
+						Nullable: false,
 					},
 				},
 			},
@@ -1115,7 +1279,7 @@ func TestAddColumnValidation(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "age",
 								Type:     "integer",
-								Nullable: ptr(false),
+								Nullable: false,
 								Default:  ptr("0"),
 							},
 						},
@@ -1155,7 +1319,7 @@ func TestAddColumnValidation(t *testing.T) {
 							Column: migrations.Column{
 								Name:     "age",
 								Type:     "integer",
-								Nullable: ptr(false),
+								Nullable: false,
 							},
 						},
 					},
@@ -1164,7 +1328,7 @@ func TestAddColumnValidation(t *testing.T) {
 			wantStartErr: migrations.FieldRequiredError{Name: "up"},
 		},
 		{
-			name: "table must have a primary key on exactly one column if up is defined",
+			name: "table can have multiple primary keys",
 			migrations: []migrations.Migration{
 				{
 					Name: "01_add_table",
@@ -1189,7 +1353,6 @@ func TestAddColumnValidation(t *testing.T) {
 					},
 				},
 			},
-			wantStartErr: migrations.BackfillNotPossibleError{Table: "orders"},
 		},
 		{
 			name: "table has no restrictions on primary keys if up is not defined",
@@ -1279,12 +1442,12 @@ func TestAddColumnWithCheckConstraint(t *testing.T) {
 							{
 								Name: "id",
 								Type: "serial",
-								Pk:   ptr(true),
+								Pk:   true,
 							},
 							{
 								Name:   "name",
 								Type:   "varchar(255)",
-								Unique: ptr(true),
+								Unique: true,
 							},
 						},
 					},
@@ -1354,12 +1517,12 @@ func TestAddColumnWithComment(t *testing.T) {
 							{
 								Name: "id",
 								Type: "serial",
-								Pk:   ptr(true),
+								Pk:   true,
 							},
 							{
 								Name:   "name",
 								Type:   "varchar(255)",
-								Unique: ptr(true),
+								Unique: true,
 							},
 						},
 					},
@@ -1373,7 +1536,7 @@ func TestAddColumnWithComment(t *testing.T) {
 						Column: migrations.Column{
 							Name:     "age",
 							Type:     "integer",
-							Nullable: ptr(false),
+							Nullable: false,
 							Default:  ptr("0"),
 							Comment:  ptr("the age of the user"),
 						},
@@ -1416,7 +1579,7 @@ func TestAddColumnDefaultTransformation(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 							},
 						},
@@ -1470,7 +1633,7 @@ func TestAddColumnDefaultTransformation(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 							},
 						},
@@ -1495,6 +1658,75 @@ func TestAddColumnDefaultTransformation(t *testing.T) {
 	}, roll.WithSQLTransformer(sqlTransformer))
 }
 
+func TestAddColumnToATableCreatedInTheSameMigration(t *testing.T) {
+	t.Parallel()
+
+	ExecuteTests(t, TestCases{
+		{
+			name: "add column to newly created table",
+			migrations: []migrations.Migration{
+				{
+					Name: "01_add_table",
+					Operations: migrations.Operations{
+						&migrations.OpCreateTable{
+							Name: "users",
+							Columns: []migrations.Column{
+								{
+									Name: "id",
+									Type: "serial",
+									Pk:   true,
+								},
+								{
+									Name: "name",
+									Type: "varchar(255)",
+								},
+							},
+						},
+						&migrations.OpAddColumn{
+							Table: "users",
+							Column: migrations.Column{
+								Name:     "age",
+								Type:     "integer",
+								Nullable: false,
+								Default:  ptr("18"),
+								Check: &migrations.CheckConstraint{
+									Name:       "age_check",
+									Constraint: "age >= 18",
+								},
+								Comment: ptr("the age of the user"),
+							},
+						},
+					},
+				},
+			},
+			afterStart: func(t *testing.T, db *sql.DB, schema string) {
+				// Inserting into the new column on the new table works.
+				MustInsert(t, db, schema, "01_add_table", "users", map[string]string{
+					"name": "Alice", "age": "30",
+				})
+
+				// Inserting a value that doesn't meet the check constraint fails.
+				MustNotInsert(t, db, schema, "01_add_table", "users", map[string]string{
+					"name": "Bob", "age": "8",
+				}, testutils.CheckViolationErrorCode)
+			},
+			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
+			},
+			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
+				// Inserting into the new column on the new table works.
+				MustInsert(t, db, schema, "01_add_table", "users", map[string]string{
+					"name": "Bob", "age": "31",
+				})
+
+				// Inserting a value that doesn't meet the check constraint fails.
+				MustNotInsert(t, db, schema, "01_add_table", "users", map[string]string{
+					"name": "Carl", "age": "8",
+				}, testutils.CheckViolationErrorCode)
+			},
+		},
+	})
+}
+
 func TestAddColumnInvalidNameLength(t *testing.T) {
 	t.Parallel()
 
@@ -1512,7 +1744,7 @@ func TestAddColumnInvalidNameLength(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 							},
 						},

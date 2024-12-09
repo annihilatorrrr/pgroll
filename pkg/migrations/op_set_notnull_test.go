@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
 	"github.com/xataio/pgroll/pkg/migrations"
 
 	"github.com/xataio/pgroll/internal/testutils"
@@ -28,22 +29,22 @@ func TestSetNotNull(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "username",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name:     "product",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name:     "review",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -56,7 +57,7 @@ func TestSetNotNull(t *testing.T) {
 							Table:    "reviews",
 							Column:   "review",
 							Nullable: ptr(false),
-							Up:       "(SELECT CASE WHEN review IS NULL THEN product || ' is good' ELSE review END)",
+							Up:       "SELECT CASE WHEN review IS NULL THEN product || ' is good' ELSE review END",
 						},
 					},
 				},
@@ -116,18 +117,8 @@ func TestSetNotNull(t *testing.T) {
 				}, rows)
 			},
 			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
-				// The new (temporary) `review` column should not exist on the underlying table.
-				ColumnMustNotExist(t, db, schema, "reviews", migrations.TemporaryName("review"))
-
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("reviews", "review"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("reviews", migrations.TemporaryName("review")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "reviews", migrations.TriggerName("reviews", "review"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "reviews", migrations.TriggerName("reviews", migrations.TemporaryName("review")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "reviews", "review")
 			},
 			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
 				// The new (temporary) `review` column should not exist on the underlying table.
@@ -147,15 +138,8 @@ func TestSetNotNull(t *testing.T) {
 					"product":  "durian",
 				}, testutils.NotNullViolationErrorCode)
 
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("reviews", "review"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("reviews", migrations.TemporaryName("review")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "reviews", migrations.TriggerName("reviews", "review"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "reviews", migrations.TriggerName("reviews", migrations.TemporaryName("review")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "reviews", "review")
 			},
 		},
 		{
@@ -170,22 +154,22 @@ func TestSetNotNull(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "username",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name:     "product",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name:     "review",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -198,7 +182,7 @@ func TestSetNotNull(t *testing.T) {
 							Table:    "reviews",
 							Column:   "review",
 							Nullable: ptr(false),
-							Up:       "(SELECT CASE WHEN review IS NULL THEN product || ' is good' ELSE review END)",
+							Up:       "SELECT CASE WHEN review IS NULL THEN product || ' is good' ELSE review END",
 							Down:     "review || ' (from new column)'",
 						},
 					},
@@ -236,12 +220,12 @@ func TestSetNotNull(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},
@@ -256,17 +240,17 @@ func TestSetNotNull(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name:     "department_id",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 									References: &migrations.ForeignKeyReference{
 										Name:     "fk_employee_department",
 										Table:    "departments",
@@ -285,7 +269,7 @@ func TestSetNotNull(t *testing.T) {
 							Table:    "employees",
 							Column:   "department_id",
 							Nullable: ptr(false),
-							Up:       "(SELECT CASE WHEN department_id IS NULL THEN 1 ELSE department_id END)",
+							Up:       "SELECT CASE WHEN department_id IS NULL THEN 1 ELSE department_id END",
 							Down:     "department_id",
 						},
 					},
@@ -314,12 +298,12 @@ func TestSetNotNull(t *testing.T) {
 								{
 									Name: "id",
 									Type: "integer",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 									Default:  ptr("'anonymous'"),
 								},
 							},
@@ -333,7 +317,7 @@ func TestSetNotNull(t *testing.T) {
 							Table:    "users",
 							Column:   "name",
 							Nullable: ptr(false),
-							Up:       "(SELECT CASE WHEN name IS NULL THEN 'anonymous' ELSE name END)",
+							Up:       "SELECT CASE WHEN name IS NULL THEN 'anonymous' ELSE name END",
 						},
 					},
 				},
@@ -378,12 +362,12 @@ func TestSetNotNull(t *testing.T) {
 								{
 									Name: "id",
 									Type: "integer",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 									Check: &migrations.CheckConstraint{
 										Name:       "name_length",
 										Constraint: "length(name) > 3",
@@ -400,7 +384,7 @@ func TestSetNotNull(t *testing.T) {
 							Table:    "users",
 							Column:   "name",
 							Nullable: ptr(false),
-							Up:       "(SELECT CASE WHEN name IS NULL THEN 'anonymous' ELSE name END)",
+							Up:       "SELECT CASE WHEN name IS NULL THEN 'anonymous' ELSE name END",
 						},
 					},
 				},
@@ -434,12 +418,12 @@ func TestSetNotNull(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -464,7 +448,7 @@ func TestSetNotNull(t *testing.T) {
 							Table:    "users",
 							Column:   "name",
 							Nullable: ptr(false),
-							Up:       "(SELECT CASE WHEN name IS NULL THEN 'anonymous' ELSE name END)",
+							Up:       "SELECT CASE WHEN name IS NULL THEN 'anonymous' ELSE name END",
 						},
 					},
 				},
@@ -509,12 +493,12 @@ func TestSetNotNull(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 									Comment:  ptr("the name of the user"),
 								},
 							},
@@ -528,7 +512,7 @@ func TestSetNotNull(t *testing.T) {
 							Table:    "users",
 							Column:   "name",
 							Nullable: ptr(false),
-							Up:       "(SELECT CASE WHEN name IS NULL THEN 'anonymous' ELSE name END)",
+							Up:       "SELECT CASE WHEN name IS NULL THEN 'anonymous' ELSE name END",
 						},
 					},
 				},
@@ -559,22 +543,22 @@ func TestSetNotNullValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name:     "username",
 						Type:     "text",
-						Nullable: ptr(false),
+						Nullable: false,
 					},
 					{
 						Name:     "product",
 						Type:     "text",
-						Nullable: ptr(false),
+						Nullable: false,
 					},
 					{
 						Name:     "review",
 						Type:     "text",
-						Nullable: ptr(true),
+						Nullable: true,
 					},
 				},
 			},
@@ -612,22 +596,22 @@ func TestSetNotNullValidation(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "username",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name:     "product",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name:     "review",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},
@@ -640,7 +624,7 @@ func TestSetNotNullValidation(t *testing.T) {
 							Table:    "reviews",
 							Column:   "review",
 							Nullable: ptr(false),
-							Up:       "(SELECT CASE WHEN review IS NULL THEN product || ' is good' ELSE review END)",
+							Up:       "SELECT CASE WHEN review IS NULL THEN product || ' is good' ELSE review END",
 							Down:     "review",
 						},
 					},

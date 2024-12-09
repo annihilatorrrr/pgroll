@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	_ "github.com/lib/pq"
+
 	"github.com/xataio/pgroll/pkg/db"
 	"github.com/xataio/pgroll/pkg/schema"
 )
@@ -28,7 +29,7 @@ type Operation interface {
 
 	// Rollback will revert the changes made by Start. It is not possible to
 	// rollback a completed migration.
-	Rollback(ctx context.Context, conn db.DB, tr SQLTransformer) error
+	Rollback(ctx context.Context, conn db.DB, tr SQLTransformer, s *schema.Schema) error
 
 	// Validate returns a descriptive error if the operation cannot be applied to the given schema.
 	Validate(ctx context.Context, s *schema.Schema) error
@@ -37,13 +38,15 @@ type Operation interface {
 // IsolatedOperation is an operation that cannot be executed with other operations
 // in the same migration.
 type IsolatedOperation interface {
-	// this operation is isolated when executed on start, cannot be executed with other operations.
+	// IsIsolated defines where this operation is isolated when executed on start, cannot be executed
+	// with other operations.
 	IsIsolated() bool
 }
 
 // RequiresSchemaRefreshOperation is an operation that requires the resulting schema to be refreshed.
 type RequiresSchemaRefreshOperation interface {
-	// this operation requires the resulting schema to be refreshed when executed on start
+	// RequiresSchemaRefresh defines if this operation requires the resulting schema to be refreshed when
+	// executed on start.
 	RequiresSchemaRefresh()
 }
 

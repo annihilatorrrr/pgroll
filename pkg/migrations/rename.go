@@ -13,7 +13,7 @@ import (
 	"github.com/xataio/pgroll/pkg/schema"
 )
 
-// RenameDuplicatedColumn:
+// RenameDuplicatedColumn
 // * renames a duplicated column to its original name
 // * renames any foreign keys on the duplicated column to their original name.
 // * Validates and renames any temporary `CHECK` constraints on the duplicated column.
@@ -57,6 +57,7 @@ func RenameDuplicatedColumn(ctx context.Context, conn db.DB, table *schema.Table
 			if err != nil {
 				return fmt.Errorf("failed to rename foreign key constraint %q: %w", fk.Name, err)
 			}
+			delete(table.ForeignKeys, fk.Name)
 		}
 	}
 
@@ -88,6 +89,7 @@ func RenameDuplicatedColumn(ctx context.Context, conn db.DB, table *schema.Table
 			if err != nil {
 				return fmt.Errorf("failed to rename check constraint %q: %w", cc.Name, err)
 			}
+			delete(table.CheckConstraints, cc.Name)
 
 			// If the constraint is a `NOT NULL` constraint, convert the duplicated
 			// unchecked `NOT NULL` constraint into a `NOT NULL` attribute on the
@@ -151,6 +153,8 @@ func RenameDuplicatedColumn(ctx context.Context, conn db.DB, table *schema.Table
 			if err != nil {
 				return fmt.Errorf("failed to create unique constraint from index %q: %w", ui.Name, err)
 			}
+			// Index no longer exists, remove it from the table
+			delete(table.Indexes, ui.Name)
 		}
 	}
 
