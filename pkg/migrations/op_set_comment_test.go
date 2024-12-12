@@ -8,6 +8,7 @@ import (
 
 	"github.com/oapi-codegen/nullable"
 	"github.com/stretchr/testify/assert"
+
 	"github.com/xataio/pgroll/pkg/migrations"
 )
 
@@ -27,7 +28,7 @@ func TestSetComment(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:    "name",
@@ -108,7 +109,7 @@ func TestSetComment(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:    "name",
@@ -191,7 +192,7 @@ func TestSetComment(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:    "name",
@@ -241,7 +242,7 @@ func TestSetComment(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:    "name",
@@ -259,7 +260,7 @@ func TestSetComment(t *testing.T) {
 							Table:    "users",
 							Column:   "name",
 							Nullable: ptr(true),
-							Down:     "(SELECT CASE WHEN name IS NULL THEN 'placeholder' ELSE name END)",
+							Down:     "SELECT CASE WHEN name IS NULL THEN 'placeholder' ELSE name END",
 						},
 					},
 				},

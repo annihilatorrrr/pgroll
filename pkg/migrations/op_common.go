@@ -12,26 +12,20 @@ import (
 type OpName string
 
 const (
-	OpNameCreateTable        OpName = "create_table"
-	OpNameRenameTable        OpName = "rename_table"
-	OpNameDropTable          OpName = "drop_table"
-	OpNameAddColumn          OpName = "add_column"
-	OpNameDropColumn         OpName = "drop_column"
-	OpNameAlterColumn        OpName = "alter_column"
-	OpNameCreateIndex        OpName = "create_index"
-	OpNameDropIndex          OpName = "drop_index"
-	OpNameRenameConstraint   OpName = "rename_constraint"
-	OpNameDropConstraint     OpName = "drop_constraint"
-	OpNameSetReplicaIdentity OpName = "set_replica_identity"
-	OpRawSQLName             OpName = "sql"
-
-	// Internal operation types used by `alter_column`
-	OpNameRenameColumn       OpName = "rename_column"
-	OpNameSetUnique          OpName = "set_unique"
-	OpNameSetNotNull         OpName = "set_not_null"
-	OpNameSetForeignKey      OpName = "set_foreign_key"
-	OpNameSetCheckConstraint OpName = "set_check_constraint"
-	OpNameChangeType         OpName = "change_type"
+	OpNameCreateTable               OpName = "create_table"
+	OpNameRenameTable               OpName = "rename_table"
+	OpNameDropTable                 OpName = "drop_table"
+	OpNameAddColumn                 OpName = "add_column"
+	OpNameDropColumn                OpName = "drop_column"
+	OpNameAlterColumn               OpName = "alter_column"
+	OpNameCreateIndex               OpName = "create_index"
+	OpNameDropIndex                 OpName = "drop_index"
+	OpNameRenameConstraint          OpName = "rename_constraint"
+	OpNameDropConstraint            OpName = "drop_constraint"
+	OpNameSetReplicaIdentity        OpName = "set_replica_identity"
+	OpNameDropMultiColumnConstraint OpName = "drop_multicolumn_constraint"
+	OpRawSQLName                    OpName = "sql"
+	OpCreateConstraintName          OpName = "create_constraint"
 )
 
 const temporaryPrefix = "_pgroll_new_"
@@ -118,11 +112,14 @@ func (v *Operations) UnmarshalJSON(data []byte) error {
 		case OpNameDropIndex:
 			item = &OpDropIndex{}
 
-		case OpNameSetUnique:
-			item = &OpSetUnique{}
-
 		case OpRawSQLName:
 			item = &OpRawSQL{}
+
+		case OpCreateConstraintName:
+			item = &OpCreateConstraint{}
+
+		case OpNameDropMultiColumnConstraint:
+			item = &OpDropMultiColumnConstraint{}
 
 		default:
 			return fmt.Errorf("unknown migration type: %v", opName)
@@ -204,17 +201,16 @@ func OperationName(op Operation) OpName {
 	case *OpDropIndex:
 		return OpNameDropIndex
 
-	case *OpSetUnique:
-		return OpNameSetUnique
-
 	case *OpRawSQL:
 		return OpRawSQLName
+
+	case *OpCreateConstraint:
+		return OpCreateConstraintName
+
+	case *OpDropMultiColumnConstraint:
+		return OpNameDropMultiColumnConstraint
 
 	}
 
 	panic(fmt.Errorf("unknown operation for %T", op))
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }

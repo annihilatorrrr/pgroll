@@ -30,12 +30,12 @@ func TestAlterColumnMultipleSubOperations(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "varchar(255)",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -47,7 +47,7 @@ func TestAlterColumnMultipleSubOperations(t *testing.T) {
 						&migrations.OpAlterColumn{
 							Table:    "events",
 							Column:   "name",
-							Up:       "(SELECT CASE WHEN name IS NULL OR LENGTH(name) <= 3 THEN 'placeholder' ELSE name END)",
+							Up:       "SELECT CASE WHEN name IS NULL OR LENGTH(name) <= 3 THEN 'placeholder' ELSE name END",
 							Down:     "event_name",
 							Name:     ptr("event_name"),
 							Type:     ptr("text"),
@@ -186,12 +186,12 @@ func TestAlterColumnMultipleSubOperations(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "varchar(255)",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -204,8 +204,8 @@ func TestAlterColumnMultipleSubOperations(t *testing.T) {
 							Table:    "events",
 							Column:   "name",
 							Nullable: ptr(false),
-							Default:  ptr("'default'"),
-							Up:       "(SELECT CASE WHEN name IS NULL THEN 'rewritten by up SQL' ELSE name END)",
+							Default:  nullable.NewNullableWithValue("'default'"),
+							Up:       "SELECT CASE WHEN name IS NULL THEN 'rewritten by up SQL' ELSE name END",
 						},
 					},
 				},
@@ -303,12 +303,12 @@ func TestAlterColumnMultipleSubOperations(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "varchar(255)",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -374,12 +374,12 @@ func TestAlterColumnMultipleSubOperations(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "varchar(255)",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -389,17 +389,17 @@ func TestAlterColumnMultipleSubOperations(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "varchar(255)",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 								{
 									Name:     "manages",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -411,7 +411,7 @@ func TestAlterColumnMultipleSubOperations(t *testing.T) {
 						&migrations.OpAlterColumn{
 							Table:    "people",
 							Column:   "manages",
-							Up:       "(SELECT CASE WHEN manages IS NULL THEN 1 ELSE manages END)",
+							Up:       "SELECT CASE WHEN manages IS NULL THEN 1 ELSE manages END",
 							Down:     "manages",
 							Nullable: ptr(false),
 							References: &migrations.ForeignKeyReference{
@@ -564,7 +564,7 @@ func TestAlterColumnValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name: "name",
@@ -578,7 +578,7 @@ func TestAlterColumnValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name: "title",
@@ -681,7 +681,7 @@ func TestAlterColumnValidation(t *testing.T) {
 			wantStartErr: migrations.AlterColumnNoChangesError{Table: "posts", Column: "title"},
 		},
 		{
-			name: "if a backfill is required, the table must have a primary key on exactly one column",
+			name: "backfill with multiple primary keys",
 			migrations: []migrations.Migration{
 				{
 					Name: "01_add_table",
@@ -699,11 +699,12 @@ func TestAlterColumnValidation(t *testing.T) {
 							Table:    "orders",
 							Column:   "quantity",
 							Nullable: ptr(false),
+							Up:       "1",
 						},
 					},
 				},
 			},
-			wantStartErr: migrations.BackfillNotPossibleError{Table: "orders"},
+			wantStartErr: nil,
 		},
 		{
 			name: "rename-only operations don't have primary key requirements",

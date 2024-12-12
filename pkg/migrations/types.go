@@ -29,10 +29,10 @@ type Column struct {
 	Name string `json:"name"`
 
 	// Indicates if the column is nullable
-	Nullable *bool `json:"nullable,omitempty"`
+	Nullable bool `json:"nullable,omitempty"`
 
 	// Indicates if the column is part of the primary key
-	Pk *bool `json:"pk,omitempty"`
+	Pk bool `json:"pk,omitempty"`
 
 	// Foreign key constraint for the column
 	References *ForeignKeyReference `json:"references,omitempty"`
@@ -41,7 +41,7 @@ type Column struct {
 	Type string `json:"type"`
 
 	// Indicates if the column values must be unique
-	Unique *bool `json:"unique,omitempty"`
+	Unique bool `json:"unique,omitempty"`
 }
 
 // Foreign key reference definition
@@ -67,6 +67,12 @@ const ForeignKeyReferenceOnDeleteRESTRICT ForeignKeyReferenceOnDelete = "RESTRIC
 const ForeignKeyReferenceOnDeleteSETDEFAULT ForeignKeyReferenceOnDelete = "SET DEFAULT"
 const ForeignKeyReferenceOnDeleteSETNULL ForeignKeyReferenceOnDelete = "SET NULL"
 
+// Map of column names to down SQL expressions
+type MultiColumnDownSQL map[string]string
+
+// Map of column names to up SQL expressions
+type MultiColumnUpSQL map[string]string
+
 // Add column operation
 type OpAddColumn struct {
 	// Column to add
@@ -90,8 +96,9 @@ type OpAlterColumn struct {
 	// New comment on the column
 	Comment nullable.Nullable[string] `json:"comment,omitempty"`
 
-	// Default value of the column
-	Default *string `json:"default,omitempty"`
+	// Default value of the column. Setting to null will drop the default if it was
+	// set previously.
+	Default nullable.Nullable[string] `json:"default,omitempty"`
 
 	// SQL expression for down migration
 	Down string `json:"down,omitempty"`
@@ -119,6 +126,51 @@ type OpAlterColumn struct {
 	Up string `json:"up,omitempty"`
 }
 
+// Add constraint to table operation
+type OpCreateConstraint struct {
+	// Check constraint expression
+	Check *string `json:"check,omitempty"`
+
+	// Columns to add constraint to
+	Columns []string `json:"columns,omitempty"`
+
+	// SQL expressions for down migrations
+	Down MultiColumnDownSQL `json:"down"`
+
+	// Name of the constraint
+	Name string `json:"name"`
+
+	// Reference to the foreign key
+	References *OpCreateConstraintReferences `json:"references,omitempty"`
+
+	// Name of the table
+	Table string `json:"table"`
+
+	// Type of the constraint
+	Type OpCreateConstraintType `json:"type"`
+
+	// SQL expressions for up migrations
+	Up MultiColumnUpSQL `json:"up"`
+}
+
+// Reference to the foreign key
+type OpCreateConstraintReferences struct {
+	// Columns to reference
+	Columns []string `json:"columns"`
+
+	// On delete behavior of the foreign key constraint
+	OnDelete ForeignKeyReferenceOnDelete `json:"on_delete,omitempty"`
+
+	// Name of the table
+	Table string `json:"table"`
+}
+
+type OpCreateConstraintType string
+
+const OpCreateConstraintTypeCheck OpCreateConstraintType = "check"
+const OpCreateConstraintTypeForeignKey OpCreateConstraintType = "foreign_key"
+const OpCreateConstraintTypeUnique OpCreateConstraintType = "unique"
+
 // Create index operation
 type OpCreateIndex struct {
 	// Names of columns on which to define the index
@@ -138,6 +190,9 @@ type OpCreateIndex struct {
 
 	// Name of table on which to define the index
 	Table string `json:"table"`
+
+	// Indicates if the index is unique
+	Unique *bool `json:"unique,omitempty"`
 }
 
 type OpCreateIndexMethod string
@@ -175,9 +230,6 @@ type OpDropColumn struct {
 
 // Drop constraint operation
 type OpDropConstraint struct {
-	// Name of the column
-	Column string `json:"column"`
-
 	// SQL expression for down migration
 	Down string `json:"down"`
 
@@ -195,6 +247,21 @@ type OpDropConstraint struct {
 type OpDropIndex struct {
 	// Index name
 	Name string `json:"name"`
+}
+
+// Drop multi-column constraint operation
+type OpDropMultiColumnConstraint struct {
+	// SQL expressions for down migrations
+	Down MultiColumnDownSQL `json:"down"`
+
+	// Name of the constraint
+	Name string `json:"name"`
+
+	// Name of the table
+	Table string `json:"table"`
+
+	// SQL expressions for up migrations
+	Up MultiColumnUpSQL `json:"up,omitempty"`
 }
 
 // Drop table operation

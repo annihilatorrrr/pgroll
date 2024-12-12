@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // XXX we create a view of the schema with the minimum required for us to
@@ -73,6 +74,9 @@ type Column struct {
 
 	// Optional comment for the column
 	Comment string `json:"comment"`
+
+	// Will contain possible enum values if the type is an enum
+	EnumValues []string `json:"enumValues"`
 }
 
 // Index represents an index on a table
@@ -202,6 +206,25 @@ func (t *Table) ConstraintExists(name string) bool {
 	return ok
 }
 
+// GetConstraintColumns gets the columns associated with the given constraint. It may return a nil
+// slice if the constraint does not exist.
+func (t *Table) GetConstraintColumns(name string) []string {
+	var columns []string
+	if c, ok := t.CheckConstraints[name]; ok {
+		columns = append(columns, c.Columns...)
+	}
+	if c, ok := t.UniqueConstraints[name]; ok {
+		columns = append(columns, c.Columns...)
+	}
+	if c, ok := t.ForeignKeys[name]; ok {
+		columns = append(columns, c.Columns...)
+	}
+
+	// Deduplicate and sort
+	slices.Sort(columns)
+	return slices.Compact(columns)
+}
+
 // GetPrimaryKey returns the columns that make up the primary key
 func (t *Table) GetPrimaryKey() (columns []*Column) {
 	for _, name := range t.PrimaryKey {
@@ -228,6 +251,16 @@ func (t *Table) RemoveColumn(column string) {
 func (t *Table) RenameColumn(from, to string) {
 	t.Columns[to] = t.Columns[from]
 	delete(t.Columns, from)
+}
+
+// PhysicalColumnNamesFor returns the physical column names for the given virtual
+// column names
+func (t *Table) PhysicalColumnNamesFor(columnNames ...string) []string {
+	physicalNames := make([]string, 0, len(columnNames))
+	for _, cn := range columnNames {
+		physicalNames = append(physicalNames, t.GetColumn(cn).Name)
+	}
+	return physicalNames
 }
 
 // Make the Schema struct implement the driver.Valuer interface. This method

@@ -14,7 +14,7 @@
 
 `pgroll` is an open source command-line tool that offers safe and reversible schema migrations for PostgreSQL by serving multiple schema versions simultaneously. It takes care of the complex migration operations to ensure that client applications continue working while the database schema is being updated. This includes ensuring changes are applied without locking the database, and that both old and new schema versions work simultaneously (even when breaking changes are being made!). This removes risks related to schema migrations, and greatly simplifies client application rollout, also allowing for instant rollbacks.
 
-See the [introductory blog post](https://xata.io/blog/pgroll-schema-migrations-postgres) for more about the problems solved by `pgroll`.
+See the [introductory blog post](https://pgroll.com/blog/introducing-pgroll-zero-downtime-reversible-schema-migrations-for-postgres) for more about the problems solved by `pgroll`.
 
 ## Features
 
@@ -49,6 +49,7 @@ When no more client applications are using the old schema version, the migration
 - [Installation](#installation)
 - [Usage](#usage)
 - [Documentation](#documentation)
+- [Benchmarks](#benchmarks)
 - [Contributing](#contributing)
 - [License](#license)
 - [Support](#support)
@@ -162,7 +163,18 @@ pgroll --postgres-url postgres://user:password@host:port/dbname rollback
 
 ## Documentation
 
-For more advanced usage, a tutorial, and detailed options refer to the full [Documentation](docs/README.md).
+For more advanced usage, tutorials, and detailed options refer to the guides and references in the [Documentation](https://pgroll.com/docs/).
+
+## Benchmarks
+
+Some performance benchmarks are run on each commit to `main` in order to track performance over time. Each benchmark is run against Postgres 14.8, 15.3, 16.4, 17.0 and "latest". Each line on the chart represents the number of rows the benchmark was run against, currently 10k, 100k and 300k rows.
+
+* `Backfill:` Rows/s to backfill a text column with the value `placeholder`. We use our default batching strategy of 10k rows per batch with no backoff.
+* `WriteAmplification/NoTrigger:` Baseline rows/s when writing data to a table without a `pgroll` trigger.
+* `WriteAmplification/WithTrigger:` Rows/s when writing data to a table when a `pgroll` trigger has been set up.
+* `ReadSchema:` Checks the number of executions per second of the `read_schema` function which is a core function executed frequently during migrations.
+
+They can be seen [here](https://xataio.github.io/pgroll/benchmarks.html).
 
 ## Contributing
 
