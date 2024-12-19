@@ -4,26 +4,17 @@ package migrations
 
 // IsNullable returns true if the column is nullable
 func (c *Column) IsNullable() bool {
-	if c.Nullable != nil {
-		return *c.Nullable
-	}
-	return false
+	return c.Nullable
 }
 
 // IsUnique returns true if the column values must be unique
 func (c *Column) IsUnique() bool {
-	if c.Unique != nil {
-		return *c.Unique
-	}
-	return false
+	return c.Unique
 }
 
 // IsPrimaryKey returns true if the column is part of the primary key
 func (c *Column) IsPrimaryKey() bool {
-	if c.Pk != nil {
-		return *c.Pk
-	}
-	return false
+	return c.Pk
 }
 
 // HasImplicitDefault returns true if the column has an implicit default value

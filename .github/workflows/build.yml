@@ -4,13 +4,44 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
 permissions:
   contents: write
   packages: write
 jobs:
+  cross-build:
+    name: cross-platform build
+    runs-on: ubuntu-24.04
+    container:
+      image: surjection/goreleaser-cross:v1.23-v2.4.8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      # Mark the checkout as 'safe' despite being owned by `root`
+      - run: git config --global --add safe.directory $GITHUB_WORKSPACE 
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: build --snapshot
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-binaries
+          path: dist/
+          if-no-files-found: error
+
   test:
     name: 'test (pg: ${{ matrix.pgVersion }}, schema: ${{ matrix.testSchema }})'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +63,7 @@ jobs:
 
   lint:
     name: lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
 
@@ -67,12 +98,22 @@ jobs:
 
   type-generation:
     name: type generation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install gofumpt tool
+        run: |
+          go install mvdan.cc/gofumpt@latest
+
       - name: Generate types
         run: |
+          chmod 666 pkg/state/init.sql
           make generate
 
       - name: Ensure generated types are up-to-date
@@ -83,9 +124,27 @@ jobs:
             exit 1
           fi
 
+  check-ledger:
+    name: check ledger
+    runs-on: ubuntu-24.04
+    steps:
+     - uses: actions/checkout@v4
+
+     - name: Generate ledger
+       run: |
+         make ledger
+
+     - name: Ensure ledger is up to date
+       run: |
+         if ! git diff --quiet; then
+           echo "generated ledger is out of date!"
+           echo "run 'make ledger' to regenerate the ledger"
+           exit 1
+         fi
+         
   dead-code-check:
     name: dead code check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -109,7 +168,7 @@ jobs:
 
   license-check:
     name: license check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -120,7 +179,7 @@ jobs:
 
   examples-schema-validation:
     name: validate examples JSON
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -130,7 +189,7 @@ jobs:
 
   examples:
     name: 'examples (pg: ${{ matrix.pgVersion }}, schema: ${{ matrix.testSchema }})'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -170,8 +229,10 @@ jobs:
         PGROLL_SCHEMA: ${{ matrix.testSchema }}
 
   release:
-    runs-on: ubuntu-latest
-    needs: [test, lint, examples-schema-validation, examples, license-check, type-generation, dead-code-check]
+    runs-on: ubuntu-24.04
+    container:
+      image: surjection/goreleaser-cross:v1.23-v2.4.8
+    needs: [test, lint, examples-schema-validation, examples, license-check, type-generation, dead-code-check, check-ledger, cross-build]
     if: startsWith(github.ref, 'refs/tags/')
     env:
       DOCKER_CLI_EXPERIMENTAL: "enabled"
@@ -179,6 +240,9 @@ jobs:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
+
+    # Mark the checkout as 'safe' despite being owned by `root`
+    - run: git config --global --add safe.directory $GITHUB_WORKSPACE 
 
     - run: git fetch --force --tags
 
@@ -198,10 +262,10 @@ jobs:
         go-version-file: 'go.mod'
 
     - name: Run GoReleaser
-      uses: goreleaser/goreleaser-action@v5
+      uses: goreleaser/goreleaser-action@v6
       with:
         distribution: goreleaser
-        version: latest
+        version: '~> v2'
         args: release --clean
       env:
         # We use two GitHub tokens here:

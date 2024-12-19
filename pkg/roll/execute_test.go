@@ -732,7 +732,7 @@ func TestSQLTransformerOptionIsUsedWhenCreatingTriggers(t *testing.T) {
 						Column: migrations.Column{
 							Name:     "description",
 							Type:     "text",
-							Nullable: ptr(false),
+							Nullable: false,
 						},
 					},
 				},
@@ -788,7 +788,7 @@ func TestSQLTransformerOptionIsUsedWhenCreatingTriggers(t *testing.T) {
 						Column: migrations.Column{
 							Name:     "description",
 							Type:     "text",
-							Nullable: ptr(false),
+							Nullable: false,
 						},
 					},
 				},
@@ -842,12 +842,12 @@ func createTableOp(tableName string) *migrations.OpCreateTable {
 			{
 				Name: "id",
 				Type: "integer",
-				Pk:   ptr(true),
+				Pk:   true,
 			},
 			{
 				Name:   "name",
 				Type:   "varchar(255)",
-				Unique: ptr(true),
+				Unique: true,
 			},
 		},
 	}
@@ -859,7 +859,7 @@ func addColumnOp(tableName string) *migrations.OpAddColumn {
 		Column: migrations.Column{
 			Name:     "age",
 			Type:     "integer",
-			Nullable: ptr(true),
+			Nullable: true,
 		},
 	}
 }
@@ -903,6 +903,7 @@ func MustSelect(t *testing.T, db *sql.DB, schema, version, table string) []map[s
 
 		res = append(res, row)
 	}
+	assert.NoError(t, q.Err())
 
 	return res
 }

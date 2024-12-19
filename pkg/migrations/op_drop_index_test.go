@@ -25,12 +25,12 @@ func TestDropIndex(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "varchar(255)",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},
@@ -79,12 +79,12 @@ func TestDropIndex(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "varchar(255)",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},

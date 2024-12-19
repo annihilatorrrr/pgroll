@@ -28,7 +28,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -42,7 +42,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -51,7 +51,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name:     "user_id",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -68,7 +68,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -129,18 +129,8 @@ func TestSetForeignKey(t *testing.T) {
 				}, rows)
 			},
 			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
-				// The new (temporary) `user_id` column should not exist on the underlying table.
-				ColumnMustNotExist(t, db, schema, "posts", migrations.TemporaryName("user_id"))
-
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", "user_id"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", migrations.TemporaryName("user_id")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", "user_id"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", migrations.TemporaryName("user_id")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "posts", "user_id")
 			},
 			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
 				// The new (temporary) `user_id` column should not exist on the underlying table.
@@ -170,15 +160,8 @@ func TestSetForeignKey(t *testing.T) {
 					{"id": 5, "title": "another post by alice", "user_id": 1},
 				}, rows)
 
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", "user_id"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", migrations.TemporaryName("user_id")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", "user_id"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", migrations.TemporaryName("user_id")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "posts", "user_id")
 			},
 		},
 		{
@@ -193,7 +176,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -207,7 +190,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -216,7 +199,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name:     "user_id",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -233,7 +216,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -282,7 +265,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -296,7 +279,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -305,7 +288,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name:     "user_id",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -323,7 +306,7 @@ func TestSetForeignKey(t *testing.T) {
 								Column:   "id",
 								OnDelete: migrations.ForeignKeyReferenceOnDeleteCASCADE,
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -388,7 +371,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -402,7 +385,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -411,7 +394,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name:     "user_id",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -429,7 +412,7 @@ func TestSetForeignKey(t *testing.T) {
 								Column:   "id",
 								OnDelete: migrations.ForeignKeyReferenceOnDeleteSETNULL,
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -497,7 +480,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -511,7 +494,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -520,7 +503,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name:     "user_id",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 									Default:  ptr("3"),
 								},
 							},
@@ -539,7 +522,7 @@ func TestSetForeignKey(t *testing.T) {
 								Column:   "id",
 								OnDelete: migrations.ForeignKeyReferenceOnDeleteSETDEFAULT,
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -610,7 +593,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -624,7 +607,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -650,7 +633,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -703,7 +686,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -717,7 +700,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -744,7 +727,7 @@ func TestSetForeignKey(t *testing.T) {
 								Column:   "id",
 								OnDelete: migrations.ForeignKeyReferenceOnDeleteCASCADE,
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -760,7 +743,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -789,7 +772,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -803,7 +786,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -832,7 +815,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -874,7 +857,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -888,17 +871,17 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "title",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 								{
 									Name:     "user_id",
 									Type:     "integer",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},
@@ -915,7 +898,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -950,7 +933,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -964,7 +947,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -1001,7 +984,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -1063,7 +1046,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -1077,7 +1060,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -1103,7 +1086,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -1132,7 +1115,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "name",
@@ -1146,7 +1129,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "title",
@@ -1155,7 +1138,7 @@ func TestSetForeignKey(t *testing.T) {
 								{
 									Name:     "user_id",
 									Type:     "integer",
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -1172,7 +1155,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -1188,7 +1171,7 @@ func TestSetForeignKey(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -1217,7 +1200,7 @@ func TestSetForeignKeyValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name: "name",
@@ -1231,7 +1214,7 @@ func TestSetForeignKeyValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name: "title",
@@ -1261,7 +1244,7 @@ func TestSetForeignKeyValidation(t *testing.T) {
 								Table:  "users",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -1288,7 +1271,7 @@ func TestSetForeignKeyValidation(t *testing.T) {
 								Table:  "doesntexist",
 								Column: "id",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -1315,7 +1298,7 @@ func TestSetForeignKeyValidation(t *testing.T) {
 								Table:  "users",
 								Column: "doesntexist",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -1343,7 +1326,7 @@ func TestSetForeignKeyValidation(t *testing.T) {
 								Column:   "id",
 								OnDelete: "invalid",
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -1368,9 +1351,9 @@ func TestSetForeignKeyValidation(t *testing.T) {
 								Name:     "fk_users_doesntexist",
 								Table:    "users",
 								Column:   "id",
-								OnDelete: "no action",
+								OnDelete: migrations.ForeignKeyReferenceOnDeleteNOACTION,
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},
@@ -1392,9 +1375,9 @@ func TestSetForeignKeyValidation(t *testing.T) {
 								Name:     "fk_users_doesntexist",
 								Table:    "users",
 								Column:   "id",
-								OnDelete: "SET NULL",
+								OnDelete: migrations.ForeignKeyReferenceOnDeleteSETNULL,
 							},
-							Up:   "(SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END)",
+							Up:   "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = user_id) THEN user_id ELSE NULL END",
 							Down: "user_id",
 						},
 					},

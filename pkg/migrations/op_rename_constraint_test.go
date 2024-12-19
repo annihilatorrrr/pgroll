@@ -24,12 +24,12 @@ func TestRenameConstraint(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name:     "username",
 						Type:     "text",
-						Nullable: ptr(false),
+						Nullable: false,
 						Check:    &migrations.CheckConstraint{Constraint: `LENGTH("username") <= 2048`, Name: "users_text_length_username"},
 					},
 				},
@@ -116,7 +116,7 @@ func TestRenameConstraintValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name: "name",

@@ -51,6 +51,7 @@ func NewRoll(ctx context.Context) (*roll.Roll, error) {
 	role := flags.Role()
 	backfillBatchSize := flags.BackfillBatchSize()
 	backfillBatchDelay := flags.BackfillBatchDelay()
+	skipValidation := flags.SkipValidation()
 
 	state, err := state.New(ctx, pgURL, stateSchema)
 	if err != nil {
@@ -62,6 +63,7 @@ func NewRoll(ctx context.Context) (*roll.Roll, error) {
 		roll.WithRole(role),
 		roll.WithBackfillBatchSize(backfillBatchSize),
 		roll.WithBackfillBatchDelay(backfillBatchDelay),
+		roll.WithSkipValidation(skipValidation),
 	)
 }
 
@@ -74,7 +76,10 @@ func Execute() error {
 	rootCmd.AddCommand(analyzeCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(statusCmd)
-	rootCmd.AddCommand(bootstrapCmd)
+	rootCmd.AddCommand(migrateCmd())
+	rootCmd.AddCommand(pullCmd())
+	rootCmd.AddCommand(latestCmd())
+	rootCmd.AddCommand(sqlCmd())
 
 	return rootCmd.Execute()
 }

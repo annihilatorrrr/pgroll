@@ -24,19 +24,19 @@ func (o *OpAddColumn) Start(ctx context.Context, conn db.DB, latestSchema string
 	}
 
 	if o.Column.Comment != nil {
-		if err := addCommentToColumn(ctx, conn, o.Table, TemporaryName(o.Column.Name), o.Column.Comment); err != nil {
+		if err := addCommentToColumn(ctx, conn, table.Name, TemporaryName(o.Column.Name), o.Column.Comment); err != nil {
 			return nil, fmt.Errorf("failed to add comment to column: %w", err)
 		}
 	}
 
 	if !o.Column.IsNullable() && o.Column.Default == nil {
-		if err := addNotNullConstraint(ctx, conn, o.Table, o.Column.Name, TemporaryName(o.Column.Name)); err != nil {
+		if err := addNotNullConstraint(ctx, conn, table.Name, o.Column.Name, TemporaryName(o.Column.Name)); err != nil {
 			return nil, fmt.Errorf("failed to add not null constraint: %w", err)
 		}
 	}
 
 	if o.Column.Check != nil {
-		if err := o.addCheckConstraint(ctx, conn); err != nil {
+		if err := o.addCheckConstraint(ctx, table.Name, conn); err != nil {
 			return nil, fmt.Errorf("failed to add check constraint: %w", err)
 		}
 	}
@@ -119,7 +119,7 @@ func (o *OpAddColumn) Complete(ctx context.Context, conn db.DB, tr SQLTransforme
 	return err
 }
 
-func (o *OpAddColumn) Rollback(ctx context.Context, conn db.DB, tr SQLTransformer) error {
+func (o *OpAddColumn) Rollback(ctx context.Context, conn db.DB, tr SQLTransformer, s *schema.Schema) error {
 	tempName := TemporaryName(o.Column.Name)
 
 	_, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s DROP COLUMN IF EXISTS %s",
@@ -184,6 +184,12 @@ func (o *OpAddColumn) Validate(ctx context.Context, s *schema.Schema) error {
 		return errors.New("adding primary key columns is not supported")
 	}
 
+	// Update the schema to ensure that the new column is visible to validation of
+	// subsequent operations.
+	table.AddColumn(o.Column.Name, schema.Column{
+		Name: TemporaryName(o.Column.Name),
+	})
+
 	return nil
 }
 
@@ -196,7 +202,7 @@ func addColumn(ctx context.Context, conn db.DB, o OpAddColumn, t *schema.Table, 
 	//   on migration completion
 	// This is to avoid unnecessary exclusive table locks.
 	if !o.Column.IsNullable() && o.Column.Default == nil {
-		o.Column.Nullable = ptr(true)
+		o.Column.Nullable = true
 	}
 
 	// Don't add a column with a CHECK constraint directly.
@@ -231,11 +237,11 @@ func addNotNullConstraint(ctx context.Context, conn db.DB, table, column, physic
 	return err
 }
 
-func (o *OpAddColumn) addCheckConstraint(ctx context.Context, conn db.DB) error {
+func (o *OpAddColumn) addCheckConstraint(ctx context.Context, tableName string, conn db.DB) error {
 	_, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s CHECK (%s) NOT VALID",
-		pq.QuoteIdentifier(o.Table),
+		pq.QuoteIdentifier(tableName),
 		pq.QuoteIdentifier(o.Column.Check.Name),
-		rewriteCheckExpression(o.Column.Check.Constraint, o.Column.Name, TemporaryName(o.Column.Name)),
+		rewriteCheckExpression(o.Column.Check.Constraint, o.Column.Name),
 	))
 	return err
 }
@@ -279,7 +285,7 @@ func (w ColumnSQLWriter) Write(col Column) (string, error) {
 		sql += fmt.Sprintf(" DEFAULT %s", d)
 	}
 	if col.References != nil {
-		onDelete := "NO ACTION"
+		onDelete := string(ForeignKeyReferenceOnDeleteNOACTION)
 		if col.References.OnDelete != "" {
 			onDelete = strings.ToUpper(string(col.References.OnDelete))
 		}

@@ -9,6 +9,7 @@ import (
 	"github.com/xataio/pgroll/internal/testutils"
 
 	"github.com/stretchr/testify/assert"
+
 	"github.com/xataio/pgroll/pkg/migrations"
 	"github.com/xataio/pgroll/pkg/roll"
 )
@@ -29,7 +30,7 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "username",
@@ -100,24 +101,14 @@ func TestChangeColumnType(t *testing.T) {
 				}, rows)
 			},
 			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
-				// The new (temporary) `rating` column should not exist on the underlying table.
-				ColumnMustNotExist(t, db, schema, "reviews", migrations.TemporaryName("rating"))
-
-				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("reviews", "rating"))
-				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("reviews", migrations.TemporaryName("rating")))
-
-				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "reviews", migrations.TriggerName("reviews", "rating"))
-				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "reviews", migrations.TriggerName("reviews", migrations.TemporaryName("rating")))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "reviews", "rating")
 			},
 			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
 				newVersionSchema := roll.VersionedSchemaName(schema, "02_change_type")
 
-				// The new (temporary) `rating` column should not exist on the underlying table.
-				ColumnMustNotExist(t, db, schema, "reviews", migrations.TemporaryName("rating"))
+				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
+				TableMustBeCleanedUp(t, db, schema, "reviews", "rating")
 
 				// The `rating` column in the new view must have the correct type.
 				ColumnMustHaveType(t, db, newVersionSchema, "reviews", "rating", "integer")
@@ -160,12 +151,12 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},
@@ -180,12 +171,12 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "name",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 								{
 									Name: "department_id",
@@ -237,13 +228,13 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "integer",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "age",
 									Type:     "text",
 									Default:  ptr("'0'"),
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -302,13 +293,13 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "integer",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "username",
 									Type:     "text",
 									Default:  ptr("'alice'"),
-									Nullable: ptr(true),
+									Nullable: true,
 								},
 							},
 						},
@@ -367,12 +358,12 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "integer",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "age",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 									Check: &migrations.CheckConstraint{
 										Name:       "age_length",
 										Constraint: "length(age) < 3",
@@ -390,7 +381,7 @@ func TestChangeColumnType(t *testing.T) {
 							Column: "age",
 							Type:   ptr("integer"),
 							Up:     "CAST(age AS integer)",
-							Down:   "(SELECT CASE WHEN age < 100 THEN age::text ELSE '0' END)",
+							Down:   "SELECT CASE WHEN age < 100 THEN age::text ELSE '0' END",
 						},
 					},
 				},
@@ -426,12 +417,12 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "integer",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "username",
 									Type:     "text",
-									Nullable: ptr(true),
+									Nullable: true,
 									Check: &migrations.CheckConstraint{
 										Name:       "username_length",
 										Constraint: "length(username) > 3",
@@ -483,12 +474,12 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "integer",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:     "username",
 									Type:     "text",
-									Nullable: ptr(false),
+									Nullable: false,
 								},
 							},
 						},
@@ -534,7 +525,7 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name: "username",
@@ -609,7 +600,7 @@ func TestChangeColumnType(t *testing.T) {
 								{
 									Name: "id",
 									Type: "serial",
-									Pk:   ptr(true),
+									Pk:   true,
 								},
 								{
 									Name:    "username",
@@ -659,7 +650,7 @@ func TestChangeColumnTypeValidation(t *testing.T) {
 					{
 						Name: "id",
 						Type: "serial",
-						Pk:   ptr(true),
+						Pk:   true,
 					},
 					{
 						Name: "username",
