@@ -27,20 +27,12 @@ func pullCmd() *cobra.Command {
 			ctx := cmd.Context()
 			targetDir := args[0]
 
-			m, err := NewRoll(ctx)
+			// Create a roll instance and check if pgroll is initialized
+			m, err := NewRollWithInitCheck(ctx)
 			if err != nil {
 				return err
 			}
 			defer m.Close()
-
-			// Ensure that pgroll is initialized
-			ok, err := m.State().IsInitialized(cmd.Context())
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return errPGRollNotInitialized
-			}
 
 			// Ensure that the target directory is valid, creating it if it doesn't
 			// exist
@@ -60,7 +52,7 @@ func pullCmd() *cobra.Command {
 			// the target database but are missing in the local directory).
 			migs, err := m.MissingMigrations(ctx, os.DirFS(targetDir))
 			if err != nil {
-				return fmt.Errorf("failed to read migrations from target directory: %w", err)
+				return fmt.Errorf("failed to get missing migrations: %w", err)
 			}
 
 			// Write the missing migrations to the target directory
@@ -87,7 +79,7 @@ func pullCmd() *cobra.Command {
 // WriteToFile writes the migration to a file in `targetDir`, prefixing the
 // filename with `prefix`. The output format defaults to YAML, but can
 // be changed to JSON by setting `useJSON` to true.
-func writeMigrationToFile(m *migrations.Migration, targetDir, prefix string, useJSON bool) error {
+func writeMigrationToFile(m *migrations.RawMigration, targetDir, prefix string, useJSON bool) error {
 	err := os.MkdirAll(targetDir, 0o755)
 	if err != nil {
 		return err
