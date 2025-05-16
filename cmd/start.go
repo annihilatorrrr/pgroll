@@ -31,21 +31,24 @@ func startCmd() *cobra.Command {
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"file"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			fileName := args[0]
 
-			m, err := NewRoll(cmd.Context())
+			// Create a roll instance and check if pgroll is initialized
+			m, err := NewRollWithInitCheck(ctx)
 			if err != nil {
 				return err
 			}
 			defer m.Close()
 
-			// Ensure that pgroll is initialized
-			ok, err := m.State().IsInitialized(cmd.Context())
+			// Check whether the schema needs an initial baseline migration
+			needsBaseline, err := m.State().HasExistingSchemaWithoutHistory(ctx, m.Schema())
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to check for existing schema: %w", err)
 			}
-			if !ok {
-				return errPGRollNotInitialized
+			if needsBaseline {
+				fmt.Printf("Schema %q is non-empty but has no migration history. Run `pgroll baseline` first\n", m.Schema())
+				return nil
 			}
 
 			c := backfill.NewConfig(
@@ -53,7 +56,7 @@ func startCmd() *cobra.Command {
 				backfill.WithBatchDelay(batchDelay),
 			)
 
-			return runMigrationFromFile(cmd.Context(), m, fileName, complete, c)
+			return runMigrationFromFile(ctx, m, fileName, complete, c)
 		},
 	}
 

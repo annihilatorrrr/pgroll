@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/xataio/pgroll/pkg/backfill"
+	"github.com/xataio/pgroll/pkg/migrations"
+	"github.com/xataio/pgroll/pkg/roll"
 )
 
 func migrateCmd() *cobra.Command {
@@ -27,20 +30,12 @@ func migrateCmd() *cobra.Command {
 			ctx := cmd.Context()
 			migrationsDir := args[0]
 
-			m, err := NewRoll(ctx)
+			// Create a roll instance and check if pgroll is initialized
+			m, err := NewRollWithInitCheck(ctx)
 			if err != nil {
 				return err
 			}
 			defer m.Close()
-
-			// Ensure that pgroll is initialized
-			ok, err := m.State().IsInitialized(cmd.Context())
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return errPGRollNotInitialized
-			}
 
 			latestVersion, err := m.State().LatestVersion(ctx, m.Schema())
 			if err != nil {
@@ -64,13 +59,23 @@ func migrateCmd() *cobra.Command {
 				return fmt.Errorf("migrations directory %q is not a directory", migrationsDir)
 			}
 
+			// Check whether the schema needs an initial baseline migration
+			needsBaseline, err := m.State().HasExistingSchemaWithoutHistory(ctx, m.Schema())
+			if err != nil {
+				return fmt.Errorf("failed to check for existing schema: %w", err)
+			}
+			if needsBaseline {
+				fmt.Printf("Schema %q is non-empty but has no migration history. Run `pgroll baseline` first\n", m.Schema())
+				return nil
+			}
+
 			migs, err := m.UnappliedMigrations(ctx, os.DirFS(migrationsDir))
 			if err != nil {
 				return fmt.Errorf("failed to get migrations to apply: %w", err)
 			}
 
 			if len(migs) == 0 {
-				fmt.Println("database is up to date; no migrations to apply")
+				fmt.Println("Database is up to date; no migrations to apply")
 				return nil
 			}
 
@@ -82,13 +87,13 @@ func migrateCmd() *cobra.Command {
 			// Run all migrations after the latest version up to the final migration,
 			// completing each one.
 			for _, mig := range migs[:len(migs)-1] {
-				if err := runMigration(ctx, m, mig, true, backfillConfig); err != nil {
+				if err := runRawMigration(ctx, m, mig, true, backfillConfig); err != nil {
 					return fmt.Errorf("failed to run migration file %q: %w", mig.Name, err)
 				}
 			}
 
 			// Run the final migration, completing it only if requested.
-			return runMigration(ctx, m, migs[len(migs)-1], complete, backfillConfig)
+			return runRawMigration(ctx, m, migs[len(migs)-1], complete, backfillConfig)
 		},
 	}
 
@@ -97,4 +102,13 @@ func migrateCmd() *cobra.Command {
 	migrateCmd.Flags().BoolVarP(&complete, "complete", "c", false, "complete the final migration rather than leaving it active")
 
 	return migrateCmd
+}
+
+func runRawMigration(ctx context.Context, m *roll.Roll, migration *migrations.RawMigration, complete bool, c *backfill.Config) error {
+	parsedMigration, err := migrations.ParseMigration(migration)
+	if err != nil {
+		return fmt.Errorf("failed to parse migration %q: %w", migration.Name, err)
+	}
+
+	return runMigration(ctx, m, parsedMigration, complete, c)
 }

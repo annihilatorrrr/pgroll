@@ -46,11 +46,6 @@ func New(ctx context.Context, pgURL, stateSchema string) (*State, error) {
 		return nil, err
 	}
 
-	_, err = conn.ExecContext(ctx, "SET LOCAL pgroll.internal to 'TRUE'")
-	if err != nil {
-		return nil, fmt.Errorf("unable to set pgroll.internal to true: %w", err)
-	}
-
 	return &State{
 		pgConn: conn,
 		schema: stateSchema,
@@ -107,6 +102,43 @@ func (s *State) Close() error {
 // Schema returns the schema name
 func (s *State) Schema() string {
 	return s.schema
+}
+
+// HasExistingSchemaWithoutHistory checks if there's an existing schema with
+// tables but no migration history. Returns true if the schema exists, has
+// tables, but has no pgroll migration history
+func (s *State) HasExistingSchemaWithoutHistory(ctx context.Context, schemaName string) (bool, error) {
+	// Check if pgroll is initialized
+	ok, err := s.IsInitialized(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+
+	// Check if there's any migration history for this schema
+	var migrationCount int
+	err = s.pgConn.QueryRowContext(ctx,
+		fmt.Sprintf("SELECT COUNT(*) FROM %s.migrations WHERE schema=$1", pq.QuoteIdentifier(s.schema)),
+		schemaName).Scan(&migrationCount)
+	if err != nil {
+		return false, fmt.Errorf("failed to check migration history: %w", err)
+	}
+
+	// If there's migration history, return false
+	if migrationCount > 0 {
+		return false, nil
+	}
+
+	// Check if the schema is empty or not, as determined by ReadSchema
+	schema, err := s.ReadSchema(ctx, schemaName)
+	if err != nil {
+		return false, fmt.Errorf("failed to read schema: %w", err)
+	}
+
+	// Return true if there are tables but no migration history
+	return len(schema.Tables) > 0, nil
 }
 
 // IsActiveMigrationPeriod returns true if there is an active migration
@@ -304,6 +336,56 @@ func (s *State) Rollback(ctx context.Context, schema, name string) error {
 
 	if rows == 0 {
 		return fmt.Errorf("no migration found with name %s", name)
+	}
+
+	return nil
+}
+
+// CreateBaseline creates a baseline migration that captures the current state of the schema.
+// It marks the migration as 'baseline' type and completed (done=true).
+// This is used when you want to start using pgroll with an existing database.
+func (s *State) CreateBaseline(ctx context.Context, schemaName, baselineVersion string) error {
+	// Check if baseline can be created (no active migrations, etc)
+	isActive, err := s.IsActiveMigrationPeriod(ctx, schemaName)
+	if err != nil {
+		return fmt.Errorf("failed to check for active migrations: %w", err)
+	}
+	if isActive {
+		return fmt.Errorf("cannot create baseline while a migration is in progress")
+	}
+
+	// Read the current schema
+	schema, err := s.ReadSchema(ctx, schemaName)
+	if err != nil {
+		return fmt.Errorf("failed to read schema: %w", err)
+	}
+
+	// Create an empty migration with just a name
+	emptyMigration := migrations.Migration{
+		Name:       baselineVersion,
+		Operations: migrations.Operations{},
+	}
+
+	rawMigration, err := json.Marshal(emptyMigration)
+	if err != nil {
+		return fmt.Errorf("unable to marshal migration: %w", err)
+	}
+
+	rawSchema, err := json.Marshal(schema)
+	if err != nil {
+		return fmt.Errorf("unable to marshal schema: %w", err)
+	}
+
+	// Insert a baseline migration record
+	stmt := fmt.Sprintf(`
+		INSERT INTO %[1]s.migrations 
+		(schema, name, migration, resulting_schema, done, parent, migration_type, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, TRUE,  %[1]s.latest_version($1), 'baseline', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		pq.QuoteIdentifier(s.schema))
+
+	_, err = s.pgConn.ExecContext(ctx, stmt, schemaName, baselineVersion, rawMigration, rawSchema)
+	if err != nil {
+		return fmt.Errorf("failed to insert baseline migration: %w", err)
 	}
 
 	return nil
