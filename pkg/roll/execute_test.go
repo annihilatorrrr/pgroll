@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	schema = "public"
+	cSchema = "public"
 )
 
 func TestMain(m *testing.M) {
@@ -41,7 +41,7 @@ func TestSchemaIsCreatedAfterMigrationStart(t *testing.T) {
 		//
 		// Check that the schema exists
 		//
-		if !schemaExists(t, db, roll.VersionedSchemaName(schema, version)) {
+		if !schemaExists(t, db, roll.VersionedSchemaName(cSchema, version)) {
 			t.Errorf("Expected schema %q to exist", version)
 		}
 	})
@@ -61,7 +61,7 @@ func TestDisabledSchemaManagement(t *testing.T) {
 		//
 		// Check that the schema doesn't get created
 		//
-		if schemaExists(t, db, roll.VersionedSchemaName(schema, version)) {
+		if schemaExists(t, db, roll.VersionedSchemaName(cSchema, version)) {
 			t.Errorf("Expected schema %q to not exist", version)
 		}
 
@@ -78,7 +78,7 @@ func TestDisabledSchemaManagement(t *testing.T) {
 			t.Fatalf("Failed to complete migration: %v", err)
 		}
 
-		if schemaExists(t, db, roll.VersionedSchemaName(schema, version)) {
+		if schemaExists(t, db, roll.VersionedSchemaName(cSchema, version)) {
 			t.Errorf("Expected schema %q to not exist", version)
 		}
 	})
@@ -111,7 +111,7 @@ func TestPreviousVersionIsDroppedAfterMigrationCompletion(t *testing.T) {
 			//
 			// Check that the schema for the first version has been dropped
 			//
-			if schemaExists(t, db, roll.VersionedSchemaName(schema, firstVersion)) {
+			if schemaExists(t, db, roll.VersionedSchemaName(cSchema, firstVersion)) {
 				t.Errorf("Expected schema %q to not exist", firstVersion)
 			}
 		})
@@ -150,7 +150,7 @@ func TestPreviousVersionIsDroppedAfterMigrationCompletion(t *testing.T) {
 			//
 			// Check that the schema for the first version has been dropped
 			//
-			if schemaExists(t, db, roll.VersionedSchemaName(schema, firstVersion)) {
+			if schemaExists(t, db, roll.VersionedSchemaName(cSchema, firstVersion)) {
 				t.Errorf("Expected schema %q to not exist", firstVersion)
 			}
 		})
@@ -198,7 +198,7 @@ func TestNoVersionSchemaForRawSQLMigrationsOptionIsRespected(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, prevVersion)
 		assert.Equal(t, "02_create_table", *prevVersion)
-		assert.False(t, schemaExists(t, db, roll.VersionedSchemaName(schema, "02_create_table")))
+		assert.False(t, schemaExists(t, db, roll.VersionedSchemaName(cSchema, "02_create_table")))
 
 		// Complete the third migration
 		err = mig.Complete(ctx)
@@ -229,7 +229,7 @@ func TestSchemaIsDroppedAfterMigrationRollback(t *testing.T) {
 		//
 		// Check that the schema has been dropped
 		//
-		if schemaExists(t, db, roll.VersionedSchemaName(schema, version)) {
+		if schemaExists(t, db, roll.VersionedSchemaName(cSchema, version)) {
 			t.Errorf("Expected schema %q to not exist", version)
 		}
 	})
@@ -849,6 +849,35 @@ func TestConnectionsSetPostgresApplicationName(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestStartFailsWithExistingSchemaWithoutHistory(t *testing.T) {
+	t.Parallel()
+
+	testutils.WithUninitializedStateAndConnectionInfo(t, func(st *state.State, connStr string, db *sql.DB) {
+		ctx := context.Background()
+
+		// Create a table to before initializing `pgroll`
+		_, err := db.ExecContext(ctx, "CREATE TABLE existing_table (id int)")
+		require.NoError(t, err)
+
+		// Initialize `pgroll`
+		err = st.Init(ctx)
+		require.NoError(t, err)
+
+		// Create a Roll instance
+		m, err := roll.New(ctx, connStr, "public", st)
+		require.NoError(t, err)
+
+		// Attempt to start a migration
+		err = m.Start(ctx, &migrations.Migration{
+			Name:       "01_create_table",
+			Operations: migrations.Operations{createTableOp("new_table")},
+		}, backfill.NewConfig())
+
+		// Verify that the error is ErrExistingSchemaWithoutHistory
+		assert.ErrorIs(t, err, roll.ErrExistingSchemaWithoutHistory)
+	})
 }
 
 func addColumnOp(tableName string) *migrations.OpAddColumn {

@@ -14,7 +14,10 @@ import (
 	"github.com/xataio/pgroll/pkg/schema"
 )
 
-var _ Operation = (*OpDropMultiColumnConstraint)(nil)
+var (
+	_ Operation  = (*OpDropMultiColumnConstraint)(nil)
+	_ Createable = (*OpDropMultiColumnConstraint)(nil)
+)
 
 func (o *OpDropMultiColumnConstraint) Start(ctx context.Context, l Logger, conn db.DB, latestSchema string, s *schema.Schema) (*schema.Table, error) {
 	l.LogOperationStart(o)
@@ -106,7 +109,7 @@ func (o *OpDropMultiColumnConstraint) Complete(ctx context.Context, l Logger, co
 			return err
 		}
 
-		if err := alterSequenceOwnerToDuplicatedColumn(ctx, conn, o.Table, columnName); err != nil {
+		if err := NewAlterSequenceOwnerAction(conn, o.Table, columnName, TemporaryName(columnName)).Execute(ctx); err != nil {
 			return err
 		}
 

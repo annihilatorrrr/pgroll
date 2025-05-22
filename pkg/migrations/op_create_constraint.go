@@ -13,7 +13,10 @@ import (
 	"github.com/xataio/pgroll/pkg/schema"
 )
 
-var _ Operation = (*OpCreateConstraint)(nil)
+var (
+	_ Operation  = (*OpCreateConstraint)(nil)
+	_ Createable = (*OpCreateConstraint)(nil)
+)
 
 func (o *OpCreateConstraint) Start(ctx context.Context, l Logger, conn db.DB, latestSchema string, s *schema.Schema) (*schema.Table, error) {
 	l.LogOperationStart(o)
@@ -90,9 +93,9 @@ func (o *OpCreateConstraint) Start(ctx context.Context, l Logger, conn db.DB, la
 	case OpCreateConstraintTypeUnique, OpCreateConstraintTypePrimaryKey:
 		return table, NewCreateUniqueIndexConcurrentlyAction(conn, s.Name, o.Name, table.Name, temporaryNames(o.Columns)...).Execute(ctx)
 	case OpCreateConstraintTypeCheck:
-		return table, o.addCheckConstraint(ctx, conn, table.Name)
+		return table, NewCreateCheckConstraintAction(conn, table.Name, o.Name, *o.Check, o.Columns, o.NoInherit, true).Execute(ctx)
 	case OpCreateConstraintTypeForeignKey:
-		return table, o.addForeignKeyConstraint(ctx, conn, table)
+		return table, NewCreateFKConstraintAction(conn, table.Name, o.Name, temporaryNames(o.Columns), o.References, false, false, true).Execute(ctx)
 	}
 
 	return table, nil
@@ -144,7 +147,7 @@ func (o *OpCreateConstraint) Complete(ctx context.Context, l Logger, conn db.DB,
 	}
 
 	for _, col := range o.Columns {
-		if err := alterSequenceOwnerToDuplicatedColumn(ctx, conn, o.Table, col); err != nil {
+		if err := NewAlterSequenceOwnerAction(conn, o.Table, col, TemporaryName(col)).Execute(ctx); err != nil {
 			return err
 		}
 	}
@@ -279,40 +282,6 @@ func (o *OpCreateConstraint) Validate(ctx context.Context, s *schema.Schema) err
 	}
 
 	return nil
-}
-
-func (o *OpCreateConstraint) addCheckConstraint(ctx context.Context, conn db.DB, tableName string) error {
-	sql := fmt.Sprintf("ALTER TABLE %s ADD ", pq.QuoteIdentifier(tableName))
-
-	writer := &ConstraintSQLWriter{
-		Name:           o.Name,
-		SkipValidation: true,
-	}
-	sql += writer.WriteCheck(rewriteCheckExpression(*o.Check, o.Columns...), o.NoInherit)
-	_, err := conn.ExecContext(ctx, sql)
-	return err
-}
-
-func (o *OpCreateConstraint) addForeignKeyConstraint(ctx context.Context, conn db.DB, table *schema.Table) error {
-	sql := fmt.Sprintf("ALTER TABLE %s ADD ", pq.QuoteIdentifier(table.Name))
-
-	writer := &ConstraintSQLWriter{
-		Name:           o.Name,
-		Columns:        temporaryNames(o.Columns),
-		SkipValidation: true,
-	}
-	sql += writer.WriteForeignKey(
-		o.References.Table,
-		o.References.Columns,
-		o.References.OnDelete,
-		o.References.OnUpdate,
-		o.References.OnDeleteSetColumns,
-		o.References.MatchType,
-	)
-
-	_, err := conn.ExecContext(ctx, sql)
-
-	return err
 }
 
 func temporaryNames(columns []string) []string {

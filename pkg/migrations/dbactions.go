@@ -372,3 +372,187 @@ func (a *DropTableAction) Execute(ctx context.Context) error {
 		pq.QuoteIdentifier(a.table)))
 	return err
 }
+
+// validateConstraintAction is a DBAction that validates a constraint in a table.
+type validateConstraintAction struct {
+	conn       db.DB
+	table      string
+	constraint string
+}
+
+func NewValidateConstraintAction(conn db.DB, table, constraint string) *validateConstraintAction {
+	return &validateConstraintAction{
+		conn:       conn,
+		table:      table,
+		constraint: constraint,
+	}
+}
+
+func (a *validateConstraintAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s VALIDATE CONSTRAINT %s",
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.constraint)))
+	return err
+}
+
+// CreateCheckConstraintAction creates a check constraint on a table.
+type CreateCheckConstraintAction struct {
+	conn           db.DB
+	table          string
+	columns        []string
+	constraint     string
+	check          string
+	noInherit      bool
+	skipValidation bool
+}
+
+func NewCreateCheckConstraintAction(conn db.DB, table, constraint, check string, columns []string, noInherit, skipValidation bool) *CreateCheckConstraintAction {
+	return &CreateCheckConstraintAction{
+		conn:           conn,
+		table:          table,
+		columns:        columns,
+		check:          check,
+		constraint:     constraint,
+		noInherit:      noInherit,
+		skipValidation: skipValidation,
+	}
+}
+
+func (a *CreateCheckConstraintAction) Execute(ctx context.Context) error {
+	sql := fmt.Sprintf("ALTER TABLE %s ADD ", pq.QuoteIdentifier(a.table))
+
+	writer := &ConstraintSQLWriter{
+		Name:           a.constraint,
+		SkipValidation: a.skipValidation,
+	}
+	sql += writer.WriteCheck(rewriteCheckExpression(a.check, a.columns...), a.noInherit)
+	_, err := a.conn.ExecContext(ctx, sql)
+	return err
+}
+
+// In order for the `check` expression to be easy to write, migration authors specify
+// the check expression as though it were being applied to the old column,
+// On migration start, however, the check is actually applied to the new (temporary)
+// column.
+// This function naively rewrites the check expression to apply to the new column.
+func rewriteCheckExpression(check string, columns ...string) string {
+	for _, col := range columns {
+		check = strings.ReplaceAll(check, col, TemporaryName(col))
+	}
+	return check
+}
+
+// createFKConstraintAction is a DBAction that creates a new foreign key constraint
+type createFKConstraintAction struct {
+	conn              db.DB
+	table             string
+	constraint        string
+	columns           []string
+	initiallyDeferred bool
+	deferrable        bool
+	reference         *TableForeignKeyReference
+	skipValidation    bool
+}
+
+func NewCreateFKConstraintAction(conn db.DB, table, constraint string, columns []string, reference *TableForeignKeyReference, initiallyDeferred, deferrable, skipValidation bool) *createFKConstraintAction {
+	return &createFKConstraintAction{
+		conn:              conn,
+		table:             table,
+		constraint:        constraint,
+		columns:           columns,
+		reference:         reference,
+		initiallyDeferred: initiallyDeferred,
+		deferrable:        deferrable,
+		skipValidation:    skipValidation,
+	}
+}
+
+func (a *createFKConstraintAction) Execute(ctx context.Context) error {
+	sql := fmt.Sprintf("ALTER TABLE %s ADD ", pq.QuoteIdentifier(a.table))
+	writer := &ConstraintSQLWriter{
+		Name:              a.constraint,
+		Columns:           a.columns,
+		InitiallyDeferred: a.initiallyDeferred,
+		Deferrable:        a.deferrable,
+		SkipValidation:    a.skipValidation,
+	}
+	sql += writer.WriteForeignKey(
+		a.reference.Table,
+		a.reference.Columns,
+		a.reference.OnDelete,
+		a.reference.OnUpdate,
+		a.reference.OnDeleteSetColumns,
+		a.reference.MatchType)
+
+	_, err := a.conn.ExecContext(ctx, sql)
+	return err
+}
+
+type alterSequenceOwnerAction struct {
+	conn  db.DB
+	table string
+	from  string
+	to    string
+}
+
+func NewAlterSequenceOwnerAction(conn db.DB, table, from, to string) *alterSequenceOwnerAction {
+	return &alterSequenceOwnerAction{
+		conn:  conn,
+		table: table,
+		from:  from,
+		to:    to,
+	}
+}
+
+func (a *alterSequenceOwnerAction) Execute(ctx context.Context) error {
+	sequence := getSequenceNameForColumn(ctx, a.conn, a.table, a.from)
+	if sequence == "" {
+		return nil
+	}
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER SEQUENCE IF EXISTS %s OWNED BY %s.%s",
+		sequence,
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.to),
+	))
+
+	return err
+}
+
+func getSequenceNameForColumn(ctx context.Context, conn db.DB, tableName, columnName string) string {
+	var sequenceName string
+	query := fmt.Sprintf(`
+		SELECT pg_get_serial_sequence('%s', '%s')
+	`, pq.QuoteIdentifier(tableName), columnName)
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+
+	if err := db.ScanFirstValue(rows, &sequenceName); err != nil {
+		return ""
+	}
+
+	return sequenceName
+}
+
+type dropConstraintAction struct {
+	conn       db.DB
+	table      string
+	constraint string
+}
+
+func NewDropConstraintAction(conn db.DB, table, constraint string) *dropConstraintAction {
+	return &dropConstraintAction{
+		conn:       conn,
+		table:      table,
+		constraint: constraint,
+	}
+}
+
+func (a *dropConstraintAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s DROP CONSTRAINT IF EXISTS %s",
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.constraint)))
+	return err
+}
