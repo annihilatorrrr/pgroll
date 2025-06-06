@@ -9,16 +9,16 @@ description: Convert SQL migration files to a pgroll migration
 $ pgroll convert /path/to/migration.sql
 ```
 
-This reads the SQL statements from `/path/to/migration.sql` and translates them into a `pgroll` migration.
+This reads the SQL statements from `/path/to/migration.sql` and translates them into a `pgroll` migration. The migration files are written to stdout in YAML format.
 
-The optional `--name` flag can be used to specify the name of the migration.
+The optional `--json` flag can be used to write migration files in JSON.
 
 ### Read SQL statements from stdin
 
 If a file name is not specified `pgroll convert` reads the SQL statements from stdin.
 
 ```
-$ cat 'CREATE TABLE my_table(name text);' | pgroll convert --name 01_create_first_table
+$ cat 'CREATE TABLE my_table(name text);' | pgroll convert
 ```
 
 <Warning>

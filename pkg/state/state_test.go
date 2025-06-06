@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -36,8 +35,15 @@ func TestSchemaOptionIsRespected(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// check that starting a new migration returns the already existing table
-		currentSchema, err := state.Start(ctx, "public", &migrations.Migration{
+		// check that we can retrieve the already existing table
+		currentSchema, err := state.LastSchema(ctx, "public")
+		assert.NoError(t, err)
+
+		assert.Equal(t, 1, len(currentSchema.Tables))
+		assert.Equal(t, "public", currentSchema.Name)
+
+		// check that we can start the migration
+		err = state.Start(ctx, "public", &migrations.Migration{
 			Name: "1_add_column",
 			Operations: migrations.Operations{
 				&migrations.OpAddColumn{
@@ -50,9 +56,6 @@ func TestSchemaOptionIsRespected(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-
-		assert.Equal(t, 1, len(currentSchema.Tables))
-		assert.Equal(t, "public", currentSchema.Name)
 	})
 }
 
@@ -259,10 +262,6 @@ func TestInferredMigration(t *testing.T) {
 
 				for i, wantMigration := range tt.wantMigrations {
 					gotMigration := gotMigrations[i]
-
-					// test there is a name for the migration, then remove it for the comparison
-					assert.True(t, strings.HasPrefix(gotMigration.Name, "sql_") && len(gotMigration.Name) > 10)
-					gotMigration.Name = ""
 
 					assert.Equal(t, wantMigration, gotMigration)
 				}

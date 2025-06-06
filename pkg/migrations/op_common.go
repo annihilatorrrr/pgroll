@@ -36,6 +36,25 @@ const (
 	OpCreateConstraintName          OpName = "create_constraint"
 )
 
+// AllNonDeprecatedOperations contains the list of operations
+// that are not deprecated. These operations must implement
+// migrations.Createable interface.
+var AllNonDeprecatedOperations = []string{
+	string(OpNameCreateTable),
+	string(OpNameRenameTable),
+	string(OpNameRenameColumn),
+	string(OpNameDropTable),
+	string(OpNameAddColumn),
+	string(OpNameDropColumn),
+	string(OpNameAlterColumn),
+	string(OpNameCreateIndex),
+	string(OpNameDropIndex),
+	string(OpNameRenameConstraint),
+	string(OpNameDropMultiColumnConstraint),
+	string(OpRawSQLName),
+	string(OpCreateConstraintName),
+}
+
 const (
 	temporaryPrefix = "_pgroll_new_"
 	deletedPrefix   = "_pgroll_del_"
@@ -72,8 +91,9 @@ func CollectFilesFromDir(dir fs.FS) ([]string, error) {
 	return migrationFiles, nil
 }
 
-// ReadMigration opens the migration file and reads the migration.
-func ReadMigration(dir fs.FS, filename string) (*Migration, error) {
+// ReadMigration opens the migration file and reads the migration as a
+// RawMigration.
+func ReadRawMigration(dir fs.FS, filename string) (*RawMigration, error) {
 	file, err := dir.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("opening migration file: %w", err)
@@ -85,7 +105,7 @@ func ReadMigration(dir fs.FS, filename string) (*Migration, error) {
 		return nil, err
 	}
 
-	mig := Migration{}
+	mig := RawMigration{}
 	switch filepath.Ext(filename) {
 	case ".json":
 		dec := json.NewDecoder(bytes.NewReader(byteValue))
@@ -98,12 +118,33 @@ func ReadMigration(dir fs.FS, filename string) (*Migration, error) {
 		return nil, fmt.Errorf("reading migration file: %w", err)
 	}
 
-	if mig.Name == "" {
-		// Extract base filename without extension as the default migration name
-		mig.Name = strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
-	}
+	// Extract base filename without extension as the migration name
+	mig.Name = strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
 
 	return &mig, nil
+}
+
+// ParseMigration converts a RawMigration to a fully parsed Migration
+func ParseMigration(raw *RawMigration) (*Migration, error) {
+	var ops Operations
+	if err := json.Unmarshal(raw.Operations, &ops); err != nil {
+		return nil, fmt.Errorf("parsing operations: %w", err)
+	}
+
+	return &Migration{
+		Name:       raw.Name,
+		Operations: ops,
+	}, nil
+}
+
+// ReadMigration reads and parses a migration file
+func ReadMigration(dir fs.FS, filename string) (*Migration, error) {
+	raw, err := ReadRawMigration(dir, filename)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseMigration(raw)
 }
 
 // UnmarshalJSON deserializes the list of operations from a JSON array.
@@ -131,7 +172,7 @@ func (v *Operations) UnmarshalJSON(data []byte) error {
 			logBody = v
 		}
 
-		item, err := operationFromName(opName)
+		item, err := OperationFromName(opName)
 		if err != nil {
 			return err
 		}
@@ -229,7 +270,7 @@ func OperationName(op Operation) OpName {
 	panic(fmt.Errorf("unknown operation for %T", op))
 }
 
-func operationFromName(name OpName) (Operation, error) {
+func OperationFromName(name OpName) (Operation, error) {
 	switch name {
 	case OpNameCreateTable:
 		return &OpCreateTable{}, nil
