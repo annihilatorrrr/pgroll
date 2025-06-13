@@ -9,7 +9,10 @@ import (
 	"github.com/xataio/pgroll/pkg/schema"
 )
 
-var _ Operation = (*OpRawSQL)(nil)
+var (
+	_ Operation  = (*OpRawSQL)(nil)
+	_ Createable = (*OpRawSQL)(nil)
+)
 
 func (o *OpRawSQL) Start(ctx context.Context, l Logger, conn db.DB, latestSchema string, s *schema.Schema) (*schema.Table, error) {
 	l.LogOperationStart(o)
@@ -18,8 +21,7 @@ func (o *OpRawSQL) Start(ctx context.Context, l Logger, conn db.DB, latestSchema
 		return nil, nil
 	}
 
-	_, err := conn.ExecContext(ctx, o.Up)
-	return nil, err
+	return nil, NewRawSQLAction(conn, o.Up).Execute(ctx)
 }
 
 func (o *OpRawSQL) Complete(ctx context.Context, l Logger, conn db.DB, s *schema.Schema) error {
@@ -29,8 +31,7 @@ func (o *OpRawSQL) Complete(ctx context.Context, l Logger, conn db.DB, s *schema
 		return nil
 	}
 
-	_, err := conn.ExecContext(ctx, o.Up)
-	return err
+	return NewRawSQLAction(conn, o.Up).Execute(ctx)
 }
 
 func (o *OpRawSQL) Rollback(ctx context.Context, l Logger, conn db.DB, s *schema.Schema) error {
@@ -40,8 +41,7 @@ func (o *OpRawSQL) Rollback(ctx context.Context, l Logger, conn db.DB, s *schema
 		return nil
 	}
 
-	_, err := conn.ExecContext(ctx, o.Down)
-	return err
+	return NewRawSQLAction(conn, o.Down).Execute(ctx)
 }
 
 func (o *OpRawSQL) Validate(ctx context.Context, s *schema.Schema) error {

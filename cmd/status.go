@@ -18,19 +18,15 @@ var statusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
-		state, err := state.New(ctx, flags.PostgresURL(), flags.StateSchema())
+		state, err := state.New(ctx, flags.PostgresURL(), flags.StateSchema(), state.WithPgrollVersion(Version))
 		if err != nil {
 			return err
 		}
 		defer state.Close()
 
 		// Ensure that pgroll is initialized
-		ok, err := state.IsInitialized(ctx)
-		if err != nil {
+		if err := EnsureInitialized(ctx, state); err != nil {
 			return err
-		}
-		if !ok {
-			return errPGRollNotInitialized
 		}
 
 		status, err := state.Status(ctx, flags.Schema())

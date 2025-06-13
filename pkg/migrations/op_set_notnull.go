@@ -34,7 +34,17 @@ func (o *OpSetNotNull) Start(ctx context.Context, l Logger, conn db.DB, latestSc
 	}
 
 	// Add an unchecked NOT NULL constraint to the new column.
-	if err := addNotNullConstraint(ctx, conn, table.Name, o.Column, column.Name); err != nil {
+	skipInherit := false
+	skipValidate := true // We will validate the constraint later in the Complete step.
+	if err := NewCreateCheckConstraintAction(
+		conn,
+		table.Name,
+		NotNullConstraintName(o.Column),
+		fmt.Sprintf("%s IS NOT NULL", o.Column),
+		[]string{o.Column},
+		skipInherit,
+		skipValidate,
+	).Execute(ctx); err != nil {
 		return nil, fmt.Errorf("failed to add not null constraint: %w", err)
 	}
 
@@ -48,9 +58,7 @@ func (o *OpSetNotNull) Complete(ctx context.Context, l Logger, conn db.DB, s *sc
 	// The constraint must be valid because:
 	// * Existing NULL values in the old column were rewritten using the `up` SQL during backfill.
 	// * New NULL values written to the old column during the migration period were also rewritten using `up` SQL.
-	_, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s VALIDATE CONSTRAINT %s",
-		pq.QuoteIdentifier(o.Table),
-		pq.QuoteIdentifier(NotNullConstraintName(o.Column))))
+	err := NewValidateConstraintAction(conn, o.Table, NotNullConstraintName(o.Column)).Execute(ctx)
 	if err != nil {
 		return err
 	}
@@ -64,9 +72,7 @@ func (o *OpSetNotNull) Complete(ctx context.Context, l Logger, conn db.DB, s *sc
 	}
 
 	// Drop the NOT NULL constraint
-	_, err = conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s DROP CONSTRAINT IF EXISTS %s",
-		pq.QuoteIdentifier(o.Table),
-		pq.QuoteIdentifier(NotNullConstraintName(o.Column))))
+	err = NewDropConstraintAction(conn, o.Table, NotNullConstraintName(o.Column)).Execute(ctx)
 	if err != nil {
 		return err
 	}

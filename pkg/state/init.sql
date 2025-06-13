@@ -31,10 +31,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS history_is_linear ON placeholder.migrations (s
 ALTER TABLE placeholder.migrations
     ADD COLUMN IF NOT EXISTS migration_type varchar(32) DEFAULT 'pgroll' CONSTRAINT migration_type_check CHECK (migration_type IN ('pgroll', 'inferred'));
 
+-- Update the `migration_type` column to also allow a `baseline` migration type.
+ALTER TABLE placeholder.migrations
+    DROP CONSTRAINT migration_type_check;
+
+ALTER TABLE placeholder.migrations
+    ADD CONSTRAINT migration_type_check CHECK (migration_type IN ('pgroll', 'inferred', 'baseline'));
+
 -- Change timestamp columns to use timestamptz
 ALTER TABLE placeholder.migrations
     ALTER COLUMN created_at SET DATA TYPE timestamptz USING created_at AT TIME ZONE 'UTC',
     ALTER COLUMN updated_at SET DATA TYPE timestamptz USING updated_at AT TIME ZONE 'UTC';
+
+-- Table to track pgroll binary version
+CREATE TABLE IF NOT EXISTS placeholder.pgroll_version (
+    version text NOT NULL,
+    initialized_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (version)
+);
 
 -- Helper functions
 -- Are we in the middle of a migration?
@@ -54,8 +68,34 @@ $$
 LANGUAGE SQL
 STABLE;
 
--- Get the latest version name (this is the one with child migrations)
+-- Get the latest version schema name
 CREATE OR REPLACE FUNCTION placeholder.latest_version (schemaname name)
+    RETURNS text
+    SECURITY DEFINER
+    SET search_path = placeholder, pg_catalog, pg_temp
+    AS $$
+    SELECT
+        COALESCE(p.migration ->> 'version_schema', p.name)
+    FROM
+        placeholder.migrations p
+    WHERE
+        NOT EXISTS (
+            SELECT
+                1
+            FROM
+                placeholder.migrations c
+            WHERE
+                SCHEMA = schemaname
+                AND c.parent = p.name)
+        AND SCHEMA = schemaname
+$$
+LANGUAGE SQL
+STABLE;
+
+-- Get the name of the latest version schema, or NULL if there is none.
+-- This will be the same as the version-schema name of the migration in most
+-- cases, unless the migration sets its `versionSchema` field.
+CREATE OR REPLACE FUNCTION placeholder.latest_migration (schemaname name)
     RETURNS text
     SECURITY DEFINER
     SET search_path = placeholder, pg_catalog, pg_temp
@@ -78,10 +118,64 @@ $$
 LANGUAGE SQL
 STABLE;
 
--- Get the name of the previous version of the schema, or NULL if there is none.
+-- Get the previous version schema name, or NULL if there is none.
 -- This ignores previous versions for which no version schema exists, such as
 -- versions corresponding to inferred migrations.
 CREATE OR REPLACE FUNCTION placeholder.previous_version (schemaname name, includeInferred boolean)
+    RETURNS text
+    AS $$
+    WITH RECURSIVE ancestors AS (
+        SELECT
+            name,
+            migration ->> 'version_schema' AS versionSchema,
+            schema,
+            parent,
+            migration_type,
+            0 AS depth
+        FROM
+            placeholder.migrations
+        WHERE
+            name = placeholder.latest_migration (schemaname)
+            AND SCHEMA = schemaname
+        UNION ALL
+        SELECT
+            m.name,
+            m.migration ->> 'version_schema' AS versionSchema,
+            m.schema,
+            m.parent,
+            m.migration_type,
+            a.depth + 1
+        FROM
+            placeholder.migrations m
+            JOIN ancestors a ON m.name = a.parent
+                AND m.schema = a.schema
+)
+        SELECT
+            COALESCE(a.versionSchema, a.name)
+        FROM
+            ancestors a
+    WHERE
+        a.depth > 0
+        AND (includeInferred
+            OR (a.migration_type = 'pgroll'
+                AND EXISTS (
+                    SELECT
+                        s.schema_name
+                    FROM
+                        information_schema.schemata s
+                    WHERE
+                        s.schema_name = schemaname || '_' || COALESCE(a.versionSchema, a.name))))
+    ORDER BY
+        a.depth ASC
+    LIMIT 1;
+$$
+LANGUAGE SQL
+STABLE;
+
+-- Get the name of the previous migration, or NULL if there is none.
+-- This ignores previous versions for which no version schema exists, such as
+-- versions corresponding to inferred migrations.
+CREATE OR REPLACE FUNCTION placeholder.previous_migration (schemaname name, includeInferred boolean)
     RETURNS text
     AS $$
     WITH RECURSIVE ancestors AS (
@@ -94,7 +188,7 @@ CREATE OR REPLACE FUNCTION placeholder.previous_version (schemaname name, includ
         FROM
             placeholder.migrations
         WHERE
-            name = placeholder.latest_version (schemaname)
+            name = placeholder.latest_migration (schemaname)
             AND SCHEMA = schemaname
         UNION ALL
         SELECT
@@ -317,8 +411,8 @@ DECLARE
     schemaname text;
     migration_id text;
 BEGIN
-    -- Ignore migrations done by pgroll
-    IF (pg_catalog.current_setting('pgroll.internal', 'TRUE') <> 'TRUE') THEN
+    -- Ignore schema changes made by pgroll
+    IF (pg_catalog.current_setting('pgroll.internal', TRUE) = 'TRUE') THEN
         RETURN;
     END IF;
     IF tg_event = 'sql_drop' AND tg_tag = 'DROP SCHEMA' THEN
@@ -377,15 +471,39 @@ BEGIN
         AND migration_type = 'inferred'
         AND migration -> 'operations' -> 0 -> 'sql' ->> 'up' = current_query();
     -- Someone did a schema change without pgroll, include it in the history
-    SELECT
-        INTO migration_id pg_catalog.format('sql_%s', pg_catalog.substr(pg_catalog.md5(pg_catalog.random()::text), 0, 15));
+    -- Get the latest non-inferred migration name with microsecond timestamp for ordering
+    WITH latest_non_inferred AS (
+        SELECT
+            name
+        FROM
+            placeholder.migrations
+        WHERE
+            SCHEMA = schemaname
+            AND migration_type != 'inferred'
+        ORDER BY
+            created_at DESC
+        LIMIT 1
+)
+SELECT
+    INTO migration_id CASE WHEN EXISTS (
+        SELECT
+            1
+        FROM
+            latest_non_inferred) THEN
+        pg_catalog.format('%s_%s', (
+                SELECT
+                    name
+                FROM latest_non_inferred), pg_catalog.to_char(pg_catalog.clock_timestamp(), 'YYYYMMDDHH24MISSUS'))
+    ELSE
+        pg_catalog.format('00000_initial_%s', pg_catalog.to_char(pg_catalog.clock_timestamp(), 'YYYYMMDDHH24MISSUS'))
+    END;
     INSERT INTO placeholder.migrations (schema, name, migration, resulting_schema, done, parent, migration_type, created_at, updated_at)
-        VALUES (schemaname, migration_id, pg_catalog.json_build_object('name', migration_id, 'operations', (
-                    SELECT
-                        pg_catalog.json_agg(pg_catalog.json_build_object('sql', pg_catalog.json_build_object('up', pg_catalog.current_query()))))),
+        VALUES (schemaname, migration_id, pg_catalog.json_build_object('version_schema', 'sql_' || substring(md5(random()::text), 1, 8), 'operations', (
+                SELECT
+                    pg_catalog.json_agg(pg_catalog.json_build_object('sql', pg_catalog.json_build_object('up', pg_catalog.current_query()))))),
             placeholder.read_schema (schemaname),
             TRUE,
-            placeholder.latest_version (schemaname),
+            placeholder.latest_migration (schemaname),
             'inferred',
             statement_timestamp(),
             statement_timestamp());

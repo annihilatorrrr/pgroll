@@ -8,15 +8,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lib/pq"
-
 	"github.com/xataio/pgroll/internal/defaults"
 	"github.com/xataio/pgroll/pkg/backfill"
 	"github.com/xataio/pgroll/pkg/db"
 	"github.com/xataio/pgroll/pkg/schema"
 )
 
-var _ Operation = (*OpAddColumn)(nil)
+var (
+	_ Operation  = (*OpAddColumn)(nil)
+	_ Createable = (*OpAddColumn)(nil)
+)
 
 func (o *OpAddColumn) Start(ctx context.Context, l Logger, conn db.DB, latestSchema string, s *schema.Schema) (*schema.Table, error) {
 	l.LogOperationStart(o)
@@ -52,14 +53,32 @@ func (o *OpAddColumn) Start(ctx context.Context, l Logger, conn db.DB, latestSch
 	// the column as no DEFAULT or because the default value cannot be set using
 	// the fast path optimization), add a NOT NULL constraint to the column which
 	// will be validated on migration completion.
+	skipInherit := false
+	skipValidate := true
 	if !o.Column.IsNullable() && (o.Column.Default == nil || !fastPathDefault) {
-		if err := addNotNullConstraint(ctx, conn, table.Name, o.Column.Name, TemporaryName(o.Column.Name)); err != nil {
+		if err := NewCreateCheckConstraintAction(
+			conn,
+			table.Name,
+			NotNullConstraintName(o.Column.Name),
+			fmt.Sprintf("%s IS NOT NULL", o.Column.Name),
+			[]string{o.Column.Name},
+			skipInherit,
+			skipValidate,
+		).Execute(ctx); err != nil {
 			return nil, fmt.Errorf("failed to add not null constraint: %w", err)
 		}
 	}
 
 	if o.Column.Check != nil {
-		if err := o.addCheckConstraint(ctx, table.Name, conn); err != nil {
+		if err := NewCreateCheckConstraintAction(
+			conn,
+			table.Name,
+			o.Column.Check.Name,
+			o.Column.Check.Constraint,
+			[]string{o.Column.Name},
+			skipInherit,
+			skipValidate,
+		).Execute(ctx); err != nil {
 			return nil, fmt.Errorf("failed to add check constraint: %w", err)
 		}
 	}
@@ -149,20 +168,18 @@ func (o *OpAddColumn) Complete(ctx context.Context, l Logger, conn db.DB, s *sch
 	}
 
 	if o.Column.Check != nil {
-		_, err = conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s VALIDATE CONSTRAINT %s",
-			pq.QuoteIdentifier(o.Table),
-			pq.QuoteIdentifier(o.Column.Check.Name)))
+		err = NewValidateConstraintAction(conn, o.Table, o.Column.Check.Name).Execute(ctx)
 		if err != nil {
 			return err
 		}
 	}
 
 	if o.Column.Unique {
-		_, err = conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s_%s_key UNIQUE USING INDEX %s",
-			pq.QuoteIdentifier(o.Table),
+		err := NewAddConstraintUsingUniqueIndex(conn,
 			o.Table,
 			o.Column.Name,
-			UniqueIndexName(o.Column.Name)))
+			UniqueIndexName(o.Column.Name),
+		).Execute(ctx)
 		if err != nil {
 			return err
 		}
@@ -172,11 +189,7 @@ func (o *OpAddColumn) Complete(ctx context.Context, l Logger, conn db.DB, s *sch
 	// optimization, set it here.
 	column := s.GetTable(o.Table).GetColumn(TemporaryName(o.Column.Name))
 	if o.Column.HasDefault() && column.Default == nil {
-		_, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s ALTER COLUMN %s SET DEFAULT %s",
-			pq.QuoteIdentifier(o.Table),
-			pq.QuoteIdentifier(o.Column.Name),
-			*o.Column.Default,
-		))
+		err := NewSetDefaultValueAction(conn, o.Table, o.Column.Name, *o.Column.Default).Execute(ctx)
 		if err != nil {
 			return err
 		}
@@ -211,8 +224,7 @@ func (o *OpAddColumn) Rollback(ctx context.Context, l Logger, conn db.DB, s *sch
 		return err
 	}
 
-	_, err = conn.ExecContext(ctx, fmt.Sprintf("DROP FUNCTION IF EXISTS %s CASCADE",
-		pq.QuoteIdentifier(TriggerFunctionName(o.Table, o.Column.Name))))
+	err = NewDropFunctionAction(conn, TriggerFunctionName(o.Table, o.Column.Name)).Execute(ctx)
 	if err != nil {
 		return err
 	}
@@ -327,60 +339,27 @@ func addColumn(ctx context.Context, conn db.DB, o OpAddColumn, t *schema.Table, 
 	}
 
 	o.Column.Name = TemporaryName(o.Column.Name)
-	columnWriter := ColumnSQLWriter{WithPK: true}
-	colSQL, err := columnWriter.Write(o.Column)
-	if err != nil {
-		return err
-	}
 
-	_, err = conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s",
-		pq.QuoteIdentifier(t.Name),
-		colSQL,
-	))
-
-	return err
+	withPK := true
+	return NewAddColumnAction(conn, t.Name, o.Column, withPK).Execute(ctx)
 }
 
 // upgradeNotNullConstraintToNotNullAttribute validates and upgrades a NOT NULL
 // constraint to a NOT NULL column attribute. The constraint is removed after
 // the column attribute is added.
 func upgradeNotNullConstraintToNotNullAttribute(ctx context.Context, conn db.DB, tableName, columnName string) error {
-	_, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s VALIDATE CONSTRAINT %s",
-		pq.QuoteIdentifier(tableName),
-		pq.QuoteIdentifier(NotNullConstraintName(columnName))))
+	err := NewValidateConstraintAction(conn, tableName, NotNullConstraintName(columnName)).Execute(ctx)
 	if err != nil {
 		return err
 	}
 
-	_, err = conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s ALTER COLUMN %s SET NOT NULL",
-		pq.QuoteIdentifier(tableName),
-		pq.QuoteIdentifier(columnName)))
+	err = NewSetNotNullAction(conn, tableName, columnName).Execute(ctx)
 	if err != nil {
 		return err
 	}
 
-	_, err = conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s DROP CONSTRAINT IF EXISTS %s",
-		pq.QuoteIdentifier(tableName),
-		pq.QuoteIdentifier(NotNullConstraintName(columnName))))
+	err = NewDropConstraintAction(conn, tableName, NotNullConstraintName(columnName)).Execute(ctx)
 
-	return err
-}
-
-func addNotNullConstraint(ctx context.Context, conn db.DB, table, column, physicalColumn string) error {
-	_, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s CHECK (%s IS NOT NULL) NOT VALID",
-		pq.QuoteIdentifier(table),
-		pq.QuoteIdentifier(NotNullConstraintName(column)),
-		pq.QuoteIdentifier(physicalColumn),
-	))
-	return err
-}
-
-func (o *OpAddColumn) addCheckConstraint(ctx context.Context, tableName string, conn db.DB) error {
-	_, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s CHECK (%s) NOT VALID",
-		pq.QuoteIdentifier(tableName),
-		pq.QuoteIdentifier(o.Column.Check.Name),
-		rewriteCheckExpression(o.Column.Check.Constraint, o.Column.Name),
-	))
 	return err
 }
 
@@ -397,56 +376,4 @@ func NotNullConstraintName(columnName string) string {
 // IsNotNullConstraintName returns true if the given name is a NOT NULL constraint name
 func IsNotNullConstraintName(name string) bool {
 	return strings.HasPrefix(name, "_pgroll_check_not_null_")
-}
-
-// ColumnSQLWriter writes a column to SQL
-// It can optionally include the primary key constraint
-// When creating a table, the primary key constraint is not added to the column definition
-type ColumnSQLWriter struct {
-	WithPK bool
-}
-
-func (w ColumnSQLWriter) Write(col Column) (string, error) {
-	sql := fmt.Sprintf("%s %s", pq.QuoteIdentifier(col.Name), col.Type)
-
-	if w.WithPK && col.IsPrimaryKey() {
-		sql += " PRIMARY KEY"
-	}
-
-	if col.IsUnique() {
-		sql += " UNIQUE"
-	}
-	if !col.IsNullable() {
-		sql += " NOT NULL"
-	}
-	if col.Default != nil {
-		sql += fmt.Sprintf(" DEFAULT %s", *col.Default)
-	}
-
-	if col.Generated != nil {
-		if col.Generated.Expression != "" {
-			sql += fmt.Sprintf(" GENERATED ALWAYS AS (%s) STORED", col.Generated.Expression)
-		} else if col.Generated.Identity != nil {
-			sql += fmt.Sprintf(" GENERATED %s AS IDENTITY", col.Generated.Identity.UserSpecifiedValues)
-			if col.Generated.Identity.SequenceOptions != "" {
-				sql += fmt.Sprintf(" (%s)", col.Generated.Identity.SequenceOptions)
-			}
-		}
-	}
-
-	if col.References != nil {
-		writer := &ConstraintSQLWriter{Name: col.References.Name}
-		sql += " " + writer.WriteForeignKey(
-			col.References.Table,
-			[]string{col.References.Column},
-			col.References.OnDelete,
-			col.References.OnUpdate,
-			nil,
-			col.References.MatchType)
-	}
-	if col.Check != nil {
-		writer := &ConstraintSQLWriter{Name: col.Check.Name}
-		sql += " " + writer.WriteCheck(col.Check.Constraint, col.Check.NoInherit)
-	}
-	return sql, nil
 }

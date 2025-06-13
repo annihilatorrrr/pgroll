@@ -92,7 +92,7 @@ func (o *OpDropConstraint) Complete(ctx context.Context, l Logger, conn db.DB, s
 		return err
 	}
 
-	if err := alterSequenceOwnerToDuplicatedColumn(ctx, conn, o.Table, column.Name); err != nil {
+	if err := NewAlterSequenceOwnerAction(conn, o.Table, column.Name, TemporaryName(column.Name)).Execute(ctx); err != nil {
 		return err
 	}
 
@@ -111,7 +111,7 @@ func (o *OpDropConstraint) Complete(ctx context.Context, l Logger, conn db.DB, s
 	}
 
 	// Rename the new column to the old column name
-	if err := RenameDuplicatedColumn(ctx, conn, table, column); err != nil {
+	if err := NewRenameDuplicatedColumnAction(conn, table, column.Name).Execute(ctx); err != nil {
 		return err
 	}
 
@@ -131,19 +131,12 @@ func (o *OpDropConstraint) Rollback(ctx context.Context, l Logger, conn db.DB, s
 		return err
 	}
 
-	// Remove the up function and trigger
-	_, err = conn.ExecContext(ctx, fmt.Sprintf("DROP FUNCTION IF EXISTS %s CASCADE",
-		pq.QuoteIdentifier(TriggerFunctionName(o.Table, columnName)),
-	))
-	if err != nil {
-		return err
-	}
-
-	// Remove the down function and trigger
-	_, err = conn.ExecContext(ctx, fmt.Sprintf("DROP FUNCTION IF EXISTS %s CASCADE",
-		pq.QuoteIdentifier(TriggerFunctionName(o.Table, TemporaryName(columnName))),
-	))
-	if err != nil {
+	// Remove the up and down functions and triggers
+	if err := NewDropFunctionAction(
+		conn,
+		TriggerFunctionName(o.Table, columnName),
+		TriggerFunctionName(o.Table, TemporaryName(columnName)),
+	).Execute(ctx); err != nil {
 		return err
 	}
 

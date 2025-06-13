@@ -25,7 +25,10 @@ const (
 	applicationName = "pgroll"
 )
 
-var ErrMismatchedMigration = fmt.Errorf("remote migration does not match local migration")
+var (
+	ErrMismatchedMigration          = fmt.Errorf("remote migration does not match local migration")
+	ErrExistingSchemaWithoutHistory = fmt.Errorf("schema has existing tables but no migration history - baseline required")
+)
 
 type Roll struct {
 	pgConn db.DB
@@ -102,7 +105,7 @@ func setupConn(ctx context.Context, pgURL, schema string, options options) (*sql
 		return nil, err
 	}
 
-	_, err = conn.ExecContext(ctx, "SET LOCAL pgroll.internal to 'TRUE'")
+	_, err = conn.ExecContext(ctx, "SET pgroll.internal TO 'TRUE'")
 	if err != nil {
 		return nil, fmt.Errorf("unable to set pgroll.internal to true: %w", err)
 	}

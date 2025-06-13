@@ -575,7 +575,7 @@ func triggerExists(t *testing.T, db *sql.DB, schema, table, trigger string) bool
       WHERE tgrelid = $1::regclass
       AND tgname = $2
     )`,
-		fmt.Sprintf("%s.%s", schema, table), trigger).Scan(&exists)
+		fmt.Sprintf("%s.%s", pq.QuoteIdentifier(schema), pq.QuoteIdentifier(table)), trigger).Scan(&exists)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -781,6 +781,39 @@ func MustInsert(t *testing.T, db *sql.DB, schema, version, table string, record 
 	if err := insert(t, db, schema, version, table, record); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func MustUpdate(t *testing.T, db *sql.DB, schema, version, table, column, value string, record map[string]string) {
+	t.Helper()
+
+	if err := update(t, db, schema, version, table, column, value, record); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func update(t *testing.T, db *sql.DB, schema, version, table, column, value string, record map[string]string) error {
+	t.Helper()
+	versionSchema := roll.VersionedSchemaName(schema, version)
+
+	mustSetSearchPath(t, db, versionSchema)
+
+	cols := slices.Collect(maps.Keys(record))
+	slices.Sort(cols)
+
+	recordStr := "SET "
+	for i, c := range cols {
+		if i > 0 {
+			recordStr += ", "
+		}
+		recordStr += c + "=" + record[c]
+	}
+	recordStr += " WHERE " + column + "=" + value
+
+	//nolint:gosec // this is a test so we don't care about SQL injection
+	stmt := fmt.Sprintf("UPDATE %s.%s %s", versionSchema, table, recordStr)
+
+	_, err := db.Exec(stmt)
+	return err
 }
 
 func MustNotInsert(t *testing.T, db *sql.DB, schema, version, table string, record map[string]string, errorCode string) {

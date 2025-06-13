@@ -13,7 +13,10 @@ import (
 	"github.com/xataio/pgroll/pkg/schema"
 )
 
-var _ Operation = (*OpAlterColumn)(nil)
+var (
+	_ Operation  = (*OpAlterColumn)(nil)
+	_ Createable = (*OpAlterColumn)(nil)
+)
 
 func (o *OpAlterColumn) Start(ctx context.Context, l Logger, conn db.DB, latestSchema string, s *schema.Schema) (*schema.Table, error) {
 	l.LogOperationStart(o)
@@ -100,7 +103,7 @@ func (o *OpAlterColumn) Complete(ctx context.Context, l Logger, conn db.DB, s *s
 		}
 	}
 
-	if err := alterSequenceOwnerToDuplicatedColumn(ctx, conn, o.Table, o.Column); err != nil {
+	if err := NewAlterSequenceOwnerAction(conn, o.Table, o.Column, TemporaryName(o.Column)).Execute(ctx); err != nil {
 		return err
 	}
 
@@ -131,7 +134,7 @@ func (o *OpAlterColumn) Complete(ctx context.Context, l Logger, conn db.DB, s *s
 	if column == nil {
 		return ColumnDoesNotExistError{Table: o.Table, Name: o.Column}
 	}
-	if err := RenameDuplicatedColumn(ctx, conn, table, column); err != nil {
+	if err := NewRenameDuplicatedColumnAction(conn, table, column.Name).Execute(ctx); err != nil {
 		return err
 	}
 
@@ -164,19 +167,12 @@ func (o *OpAlterColumn) Rollback(ctx context.Context, l Logger, conn db.DB, s *s
 		return err
 	}
 
-	// Remove the up function and trigger
-	_, err = conn.ExecContext(ctx, fmt.Sprintf("DROP FUNCTION IF EXISTS %s CASCADE",
-		pq.QuoteIdentifier(TriggerFunctionName(o.Table, o.Column)),
-	))
-	if err != nil {
-		return err
-	}
-
-	// Remove the down function and trigger
-	_, err = conn.ExecContext(ctx, fmt.Sprintf("DROP FUNCTION IF EXISTS %s CASCADE",
-		pq.QuoteIdentifier(TriggerFunctionName(o.Table, TemporaryName(o.Column))),
-	))
-	if err != nil {
+	// Remove the up and down functions and triggers
+	if err := NewDropFunctionAction(
+		conn,
+		TriggerFunctionName(o.Table, o.Column),
+		TriggerFunctionName(o.Table, TemporaryName(o.Column)),
+	).Execute(ctx); err != nil {
 		return err
 	}
 
