@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/xataio/pgroll/cmd/flags"
-	"github.com/xataio/pgroll/pkg/state"
 
 	"github.com/spf13/cobra"
 )
@@ -18,22 +17,13 @@ var statusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
-		state, err := state.New(ctx, flags.PostgresURL(), flags.StateSchema())
+		m, err := NewRollWithInitCheck(ctx)
 		if err != nil {
 			return err
 		}
-		defer state.Close()
+		defer m.Close()
 
-		// Ensure that pgroll is initialized
-		ok, err := state.IsInitialized(ctx)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return errPGRollNotInitialized
-		}
-
-		status, err := state.Status(ctx, flags.Schema())
+		status, err := m.Status(ctx, flags.Schema())
 		if err != nil {
 			return err
 		}

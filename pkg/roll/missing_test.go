@@ -166,6 +166,24 @@ func TestMissingMigrations(t *testing.T) {
 		})
 	})
 
+	t.Run("no migrations have been applied to the target database", func(t *testing.T) {
+		fs := fstest.MapFS{
+			"01_migration_1.json": &fstest.MapFile{Data: exampleMigJSON(t, "01_migration_1")},
+			"02_migration_2.json": &fstest.MapFile{Data: exampleMigJSON(t, "02_migration_2")},
+		}
+
+		testutils.WithMigratorAndConnectionToContainer(t, func(m *roll.Roll, _ *sql.DB) {
+			ctx := context.Background()
+
+			// Get missing migrations
+			migs, err := m.MissingMigrations(ctx, fs)
+			require.NoError(t, err)
+
+			// Assert that no migrations are missing from the local directory
+			require.Len(t, migs, 0)
+		})
+	})
+
 	t.Run("migrations with no name use filename as migration name", func(t *testing.T) {
 		fs := fstest.MapFS{
 			"01_migration_1.json": &fstest.MapFile{Data: exampleMigJSON(t, "")},
@@ -191,6 +209,129 @@ func TestMissingMigrations(t *testing.T) {
 			// Assert that no migrations are missing in the local directory; the
 			// unamed migration uses the filename as the name
 			require.Len(t, migs, 0)
+		})
+	})
+
+	t.Run("baseline migrations are not considered missing", func(t *testing.T) {
+		fs := fstest.MapFS{}
+
+		testutils.WithMigratorAndConnectionToContainer(t, func(m *roll.Roll, _ *sql.DB) {
+			ctx := context.Background()
+
+			// Create a baseline migration
+			err := m.CreateBaseline(ctx, "01_initial_version")
+			require.NoError(t, err)
+
+			// Get missing migrations
+			migs, err := m.MissingMigrations(ctx, fs)
+			require.NoError(t, err)
+
+			// Assert that there are no migrations missing
+			require.Len(t, migs, 0)
+		})
+	})
+
+	t.Run("migrations before a baseline migration are not considered missing", func(t *testing.T) {
+		fs := fstest.MapFS{}
+
+		testutils.WithMigratorAndConnectionToContainer(t, func(m *roll.Roll, _ *sql.DB) {
+			ctx := context.Background()
+
+			// Apply a migration to the target database
+			err := m.Start(ctx, exampleMig(t, "01_migration_1"), backfill.NewConfig())
+			require.NoError(t, err)
+			err = m.Complete(ctx)
+			require.NoError(t, err)
+
+			// Create a baseline migration
+			err = m.CreateBaseline(ctx, "01_initial_version")
+			require.NoError(t, err)
+
+			// Apply another migration to the target database
+			err = m.Start(ctx, exampleMig(t, "02_migration_2"), backfill.NewConfig())
+			require.NoError(t, err)
+			err = m.Complete(ctx)
+			require.NoError(t, err)
+
+			// Get missing migrations
+			migs, err := m.MissingMigrations(ctx, fs)
+			require.NoError(t, err)
+
+			// Assert that there is one migration missing from the local directory
+			require.Len(t, migs, 1)
+
+			// Assert that the missing migration is the one that was applied after the baseline
+			mig, err := migrations.ParseMigration(migs[0])
+			require.NoError(t, err)
+			require.Equal(t, exampleMig(t, "02_migration_2"), mig)
+		})
+	})
+}
+
+func TestMissingMigrationsWithOldMigrationFormats(t *testing.T) {
+	t.Parallel()
+
+	t.Run("local directory contains an un-deserializable migration", func(t *testing.T) {
+		fs := fstest.MapFS{
+			"01_migration_1.json": &fstest.MapFile{Data: unDeserializableMigration(t, "01_migration_1")},
+		}
+
+		testutils.WithMigratorAndConnectionToContainer(t, func(roll *roll.Roll, _ *sql.DB) {
+			ctx := context.Background()
+
+			// Apply migrations to the target database
+			for _, migration := range []*migrations.Migration{
+				exampleMig(t, "02_migration_2"),
+				exampleMig(t, "03_migration_3"),
+			} {
+				err := roll.Start(ctx, migration, backfill.NewConfig())
+				require.NoError(t, err)
+				err = roll.Complete(ctx)
+				require.NoError(t, err)
+			}
+
+			// Get missing migrations
+			migs, err := roll.MissingMigrations(ctx, fs)
+			require.NoError(t, err)
+
+			// Assert that migrations 2 and 3 are missing in the local directory
+			require.Len(t, migs, 2)
+			require.Equal(t, "02_migration_2", migs[0].Name)
+			require.Equal(t, "03_migration_3", migs[1].Name)
+		})
+	})
+
+	t.Run("remote migration history contains an un-deserializable migration", func(t *testing.T) {
+		fs := fstest.MapFS{}
+
+		testutils.WithMigratorAndConnectionToContainer(t, func(roll *roll.Roll, db *sql.DB) {
+			ctx := context.Background()
+
+			// Apply migrations to the target database
+			for _, migration := range []*migrations.Migration{
+				exampleMig(t, "01_migration_1"),
+			} {
+				err := roll.Start(ctx, migration, backfill.NewConfig())
+				require.NoError(t, err)
+				err = roll.Complete(ctx)
+				require.NoError(t, err)
+			}
+
+			// Modify the first migration in the schema history to be un-deserializable; in
+			// practice this could happen if the migration was applied with an older
+			// version of pgroll that had a different migration format
+			_, err := db.ExecContext(ctx, `UPDATE pgroll.migrations
+				SET migration = REPLACE(migration::text, '"up"', '"upxxx"')::jsonb
+				WHERE name = '01_migration_1'`)
+			require.NoError(t, err)
+
+			// Get missing migrations
+			migs, err := roll.MissingMigrations(ctx, fs)
+			require.NoError(t, err)
+
+			// Assert that the un-deserializable migration is missing in the local directory
+			require.Len(t, migs, 1)
+			require.Equal(t, "01_migration_1", migs[0].Name)
 		})
 	})
 }

@@ -24,8 +24,9 @@ func NewRoll(ctx context.Context) (*roll.Roll, error) {
 	role := flags.Role()
 	skipValidation := flags.SkipValidation()
 	verbose := flags.Verbose()
+	useVersionSchema := flags.UseVersionSchema()
 
-	state, err := state.New(ctx, pgURL, stateSchema)
+	state, err := state.New(ctx, pgURL, stateSchema, state.WithPgrollVersion(Version))
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +36,39 @@ func NewRoll(ctx context.Context) (*roll.Roll, error) {
 		roll.WithRole(role),
 		roll.WithSkipValidation(skipValidation),
 		roll.WithLogging(verbose),
+		roll.WithVersionSchema(useVersionSchema),
 	)
+}
+
+// EnsureInitialized checks if the pgroll state schema is initialized.
+// Returns an error if the check fails or if pgroll is not initialized.
+func EnsureInitialized(ctx context.Context, state *state.State) error {
+	ok, err := state.IsInitialized(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errPGRollNotInitialized
+	}
+	return nil
+}
+
+// NewRollWithInitCheck creates a roll instance and checks if pgroll is initialized.
+// Returns the roll instance and an error if creation fails or if pgroll is not initialized.
+func NewRollWithInitCheck(ctx context.Context) (*roll.Roll, error) {
+	// Create a roll instance
+	m, err := NewRoll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure that pgroll is initialized
+	if err := EnsureInitialized(ctx, m.State()); err != nil {
+		m.Close()
+		return nil, err
+	}
+
+	return m, nil
 }
 
 func Prepare() *cobra.Command {
@@ -54,6 +87,7 @@ func Prepare() *cobra.Command {
 	rootCmd.PersistentFlags().String("pgroll-schema", "pgroll", "Postgres schema to use for pgroll internal state")
 	rootCmd.PersistentFlags().Int("lock-timeout", 500, "Postgres lock timeout in milliseconds for pgroll DDL operations")
 	rootCmd.PersistentFlags().String("role", "", "Optional postgres role to set when executing migrations")
+	rootCmd.PersistentFlags().Bool("use-version-schema", true, "Create version schemas for each migration")
 	rootCmd.PersistentFlags().Bool("verbose", false, "Enable verbose logging")
 
 	viper.BindPFlag("PG_URL", rootCmd.PersistentFlags().Lookup("postgres-url"))
@@ -61,6 +95,7 @@ func Prepare() *cobra.Command {
 	viper.BindPFlag("STATE_SCHEMA", rootCmd.PersistentFlags().Lookup("pgroll-schema"))
 	viper.BindPFlag("LOCK_TIMEOUT", rootCmd.PersistentFlags().Lookup("lock-timeout"))
 	viper.BindPFlag("ROLE", rootCmd.PersistentFlags().Lookup("role"))
+	viper.BindPFlag("USE_VERSION_SCHEMA", rootCmd.PersistentFlags().Lookup("use-version-schema"))
 	viper.BindPFlag("VERBOSE", rootCmd.PersistentFlags().Lookup("verbose"))
 
 	// register subcommands
@@ -70,10 +105,14 @@ func Prepare() *cobra.Command {
 	rootCmd.AddCommand(analyzeCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(updateCmd())
+	rootCmd.AddCommand(createCmd())
 	rootCmd.AddCommand(migrateCmd())
 	rootCmd.AddCommand(pullCmd())
 	rootCmd.AddCommand(latestCmd())
 	rootCmd.AddCommand(convertCmd())
+	rootCmd.AddCommand(baselineCmd())
+	rootCmd.AddCommand(validateCmd)
 
 	return rootCmd
 }

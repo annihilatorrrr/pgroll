@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/xataio/pgroll/pkg/backfill"
+	"github.com/xataio/pgroll/pkg/migrations"
 )
 
 func migrateCmd() *cobra.Command {
@@ -27,22 +29,14 @@ func migrateCmd() *cobra.Command {
 			ctx := cmd.Context()
 			migrationsDir := args[0]
 
-			m, err := NewRoll(ctx)
+			// Create a roll instance and check if pgroll is initialized
+			m, err := NewRollWithInitCheck(ctx)
 			if err != nil {
 				return err
 			}
 			defer m.Close()
 
-			// Ensure that pgroll is initialized
-			ok, err := m.State().IsInitialized(cmd.Context())
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return errPGRollNotInitialized
-			}
-
-			latestVersion, err := m.State().LatestVersion(ctx, m.Schema())
+			latestMigration, err := m.State().LatestMigration(ctx, m.Schema())
 			if err != nil {
 				return fmt.Errorf("unable to determine latest version: %w", err)
 			}
@@ -52,7 +46,7 @@ func migrateCmd() *cobra.Command {
 				return fmt.Errorf("unable to determine active migration period: %w", err)
 			}
 			if active {
-				fmt.Printf("migration %q is active\n", *latestVersion)
+				fmt.Printf("migration %q is active\n", *latestMigration)
 				return nil
 			}
 
@@ -64,14 +58,30 @@ func migrateCmd() *cobra.Command {
 				return fmt.Errorf("migrations directory %q is not a directory", migrationsDir)
 			}
 
-			migs, err := m.UnappliedMigrations(ctx, os.DirFS(migrationsDir))
+			// Check whether the schema needs an initial baseline migration
+			needsBaseline, err := m.State().HasExistingSchemaWithoutHistory(ctx, m.Schema())
+			if err != nil {
+				return fmt.Errorf("failed to check for existing schema: %w", err)
+			}
+			if needsBaseline {
+				fmt.Printf("Schema %q is non-empty but has no migration history. Run `pgroll baseline` first\n", m.Schema())
+				return nil
+			}
+
+			rawMigs, err := m.UnappliedMigrations(ctx, os.DirFS(migrationsDir))
 			if err != nil {
 				return fmt.Errorf("failed to get migrations to apply: %w", err)
 			}
 
-			if len(migs) == 0 {
-				fmt.Println("database is up to date; no migrations to apply")
+			if len(rawMigs) == 0 {
+				fmt.Println("Database is up to date; no migrations to apply")
 				return nil
+			}
+
+			// fail early if there is an incompatible migration
+			migs, err := parseMigrations(rawMigs)
+			if err != nil {
+				return fmt.Errorf("failed to run migrate: %w", err)
 			}
 
 			backfillConfig := backfill.NewConfig(
@@ -97,4 +107,22 @@ func migrateCmd() *cobra.Command {
 	migrateCmd.Flags().BoolVarP(&complete, "complete", "c", false, "complete the final migration rather than leaving it active")
 
 	return migrateCmd
+}
+
+// parseMigrations tries to parse all RawMigrations and collects all the errors
+// if any.
+func parseMigrations(migs []*migrations.RawMigration) ([]*migrations.Migration, error) {
+	parsedMigrations := make([]*migrations.Migration, 0, len(migs))
+	var errs error
+	for _, rawMigration := range migs {
+		m, err := migrations.ParseMigration(rawMigration)
+		if err != nil {
+			errs = errors.Join(errs, err)
+		}
+		parsedMigrations = append(parsedMigrations, m)
+	}
+	if errs != nil {
+		return nil, fmt.Errorf("incompatible migration(s): %w", errs)
+	}
+	return parsedMigrations, nil
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/xataio/pgroll/pkg/backfill"
 	"github.com/xataio/pgroll/pkg/migrations"
 	"github.com/xataio/pgroll/pkg/roll"
 )
@@ -22,7 +23,8 @@ func TestChangeColumnType(t *testing.T) {
 			name: "change column type",
 			migrations: []migrations.Migration{
 				{
-					Name: "01_add_table",
+					Name:          "01_add_table",
+					VersionSchema: "add_table",
 					Operations: migrations.Operations{
 						&migrations.OpCreateTable{
 							Name: "reviews",
@@ -50,7 +52,8 @@ func TestChangeColumnType(t *testing.T) {
 					},
 				},
 				{
-					Name: "02_change_type",
+					Name:          "02_change_type",
+					VersionSchema: "change_type",
 					Operations: migrations.Operations{
 						&migrations.OpAlterColumn{
 							Table:  "reviews",
@@ -63,7 +66,7 @@ func TestChangeColumnType(t *testing.T) {
 				},
 			},
 			afterStart: func(t *testing.T, db *sql.DB, schema string) {
-				newVersionSchema := roll.VersionedSchemaName(schema, "02_change_type")
+				newVersionSchema := roll.VersionedSchemaName(schema, "change_type")
 
 				// The new (temporary) `rating` column should exist on the underlying table.
 				ColumnMustExist(t, db, schema, "reviews", migrations.TemporaryName("rating"))
@@ -72,7 +75,7 @@ func TestChangeColumnType(t *testing.T) {
 				ColumnMustHaveType(t, db, newVersionSchema, "reviews", "rating", "integer")
 
 				// Inserting into the new `rating` column should work.
-				MustInsert(t, db, schema, "02_change_type", "reviews", map[string]string{
+				MustInsert(t, db, schema, "change_type", "reviews", map[string]string{
 					"username": "alice",
 					"product":  "apple",
 					"rating":   "5",
@@ -80,13 +83,13 @@ func TestChangeColumnType(t *testing.T) {
 
 				// The value inserted into the new `rating` column has been backfilled into
 				// the old `rating` column.
-				rows := MustSelect(t, db, schema, "01_add_table", "reviews")
+				rows := MustSelect(t, db, schema, "add_table", "reviews")
 				assert.Equal(t, []map[string]any{
 					{"id": 1, "username": "alice", "product": "apple", "rating": "5"},
 				}, rows)
 
 				// Inserting into the old `rating` column should work.
-				MustInsert(t, db, schema, "01_add_table", "reviews", map[string]string{
+				MustInsert(t, db, schema, "add_table", "reviews", map[string]string{
 					"username": "bob",
 					"product":  "banana",
 					"rating":   "8",
@@ -94,7 +97,7 @@ func TestChangeColumnType(t *testing.T) {
 
 				// The value inserted into the old `rating` column has been backfilled into
 				// the new `rating` column.
-				rows = MustSelect(t, db, schema, "02_change_type", "reviews")
+				rows = MustSelect(t, db, schema, "change_type", "reviews")
 				assert.Equal(t, []map[string]any{
 					{"id": 1, "username": "alice", "product": "apple", "rating": 5},
 					{"id": 2, "username": "bob", "product": "banana", "rating": 8},
@@ -105,7 +108,7 @@ func TestChangeColumnType(t *testing.T) {
 				TableMustBeCleanedUp(t, db, schema, "reviews", "rating")
 			},
 			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
-				newVersionSchema := roll.VersionedSchemaName(schema, "02_change_type")
+				newVersionSchema := roll.VersionedSchemaName(schema, "change_type")
 
 				// The table is cleaned up; temporary columns, trigger functions and triggers no longer exist.
 				TableMustBeCleanedUp(t, db, schema, "reviews", "rating")
@@ -114,14 +117,14 @@ func TestChangeColumnType(t *testing.T) {
 				ColumnMustHaveType(t, db, newVersionSchema, "reviews", "rating", "integer")
 
 				// Inserting into the new view should work.
-				MustInsert(t, db, schema, "02_change_type", "reviews", map[string]string{
+				MustInsert(t, db, schema, "change_type", "reviews", map[string]string{
 					"username": "carl",
 					"product":  "carrot",
 					"rating":   "3",
 				})
 
 				// Selecting from the new view should succeed.
-				rows := MustSelect(t, db, schema, "02_change_type", "reviews")
+				rows := MustSelect(t, db, schema, "change_type", "reviews")
 				assert.Equal(t, []map[string]any{
 					{"id": 1, "username": "alice", "product": "apple", "rating": 5},
 					{"id": 2, "username": "bob", "product": "banana", "rating": 8},
@@ -129,14 +132,14 @@ func TestChangeColumnType(t *testing.T) {
 				}, rows)
 
 				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("reviews", "rating"))
+				FunctionMustNotExist(t, db, schema, backfill.TriggerFunctionName("reviews", "rating"))
 				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("reviews", migrations.TemporaryName("rating")))
+				FunctionMustNotExist(t, db, schema, backfill.TriggerFunctionName("reviews", migrations.TemporaryName("rating")))
 
 				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "reviews", migrations.TriggerName("reviews", "rating"))
+				TriggerMustNotExist(t, db, schema, "reviews", backfill.TriggerName("reviews", "rating"))
 				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "reviews", migrations.TriggerName("reviews", migrations.TemporaryName("rating")))
+				TriggerMustNotExist(t, db, schema, "reviews", backfill.TriggerName("reviews", migrations.TemporaryName("rating")))
 			},
 		},
 		{
@@ -647,6 +650,54 @@ func TestChangeColumnType(t *testing.T) {
 			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
 				// The final column has a comment defined on it
 				ColumnMustHaveComment(t, db, schema, "users", "username", "the name of the user")
+			},
+		},
+		{
+			name: "can change the type of a column on a table with a case-sensitive name",
+			migrations: []migrations.Migration{
+				{
+					Name: "01_add_table",
+					Operations: migrations.Operations{
+						&migrations.OpCreateTable{
+							Name: "Users",
+							Columns: []migrations.Column{
+								{
+									Name: "id",
+									Type: "serial",
+									Pk:   true,
+								},
+								{
+									Name: "name",
+									Type: "varchar(255)",
+								},
+							},
+						},
+					},
+				},
+				{
+					Name: "02_change_type",
+					Operations: migrations.Operations{
+						&migrations.OpAlterColumn{
+							Table:  "Users",
+							Column: "name",
+							Type:   ptr("text"),
+							Up:     "name",
+							Down:   "name",
+						},
+					},
+				},
+			},
+			afterStart: func(t *testing.T, db *sql.DB, schema string) {
+				// The new column has the expected type
+				ColumnMustHaveType(t, db, schema, "Users", migrations.TemporaryName("name"), "text")
+			},
+			afterRollback: func(t *testing.T, db *sql.DB, schema string) {
+				// The table has been cleaned up
+				TableMustBeCleanedUp(t, db, schema, "Users", "name")
+			},
+			afterComplete: func(t *testing.T, db *sql.DB, schema string) {
+				// The new column has the expected type
+				ColumnMustHaveType(t, db, schema, "Users", "name", "text")
 			},
 		},
 	})

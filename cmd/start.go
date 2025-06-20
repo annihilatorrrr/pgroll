@@ -31,21 +31,24 @@ func startCmd() *cobra.Command {
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"file"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			fileName := args[0]
 
-			m, err := NewRoll(cmd.Context())
+			// Create a roll instance and check if pgroll is initialized
+			m, err := NewRollWithInitCheck(ctx)
 			if err != nil {
 				return err
 			}
 			defer m.Close()
 
-			// Ensure that pgroll is initialized
-			ok, err := m.State().IsInitialized(cmd.Context())
+			// Check whether the schema needs an initial baseline migration
+			needsBaseline, err := m.State().HasExistingSchemaWithoutHistory(ctx, m.Schema())
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to check for existing schema: %w", err)
 			}
-			if !ok {
-				return errPGRollNotInitialized
+			if needsBaseline {
+				fmt.Printf("Schema %q is non-empty but has no migration history. Run `pgroll baseline` first\n", m.Schema())
+				return nil
 			}
 
 			c := backfill.NewConfig(
@@ -53,7 +56,7 @@ func startCmd() *cobra.Command {
 				backfill.WithBatchDelay(batchDelay),
 			)
 
-			return runMigrationFromFile(cmd.Context(), m, fileName, complete, c)
+			return runMigrationFromFile(ctx, m, fileName, complete, c)
 		},
 	}
 
@@ -102,9 +105,14 @@ func runMigration(ctx context.Context, m *roll.Roll, migration *migrations.Migra
 		}
 	}
 
-	version := migration.Name
-	viewName := roll.VersionedSchemaName(flags.Schema(), version)
-	msg := fmt.Sprintf("New version of the schema available under the postgres %q schema", viewName)
+	var msg string
+	if m.UseVersionSchema() {
+		viewName := roll.VersionedSchemaName(flags.Schema(), migration.VersionSchemaName())
+		msg = fmt.Sprintf("New version of the schema available under the postgres %q schema", viewName)
+	} else {
+		msg = fmt.Sprintf("Migration %q started successfully", migration.Name)
+	}
+
 	sp.Success(msg)
 
 	return nil

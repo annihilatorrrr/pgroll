@@ -25,7 +25,10 @@ const (
 	applicationName = "pgroll"
 )
 
-var ErrMismatchedMigration = fmt.Errorf("remote migration does not match local migration")
+var (
+	ErrMismatchedMigration          = fmt.Errorf("remote migration does not match local migration")
+	ErrExistingSchemaWithoutHistory = fmt.Errorf("schema has existing tables but no migration history - baseline required")
+)
 
 type Roll struct {
 	pgConn db.DB
@@ -37,9 +40,6 @@ type Roll struct {
 
 	// disable pgroll version schemas creation and deletion
 	disableVersionSchemas bool
-
-	// disable creation of version schema for raw SQL migrations
-	noVersionSchemaForRawSQL bool
 
 	migrationHooks MigrationHooks
 	state          *state.State
@@ -71,15 +71,14 @@ func New(ctx context.Context, pgURL, schema string, state *state.State, opts ...
 	}
 
 	return &Roll{
-		pgConn:                   &db.RDB{DB: conn},
-		logger:                   logger,
-		schema:                   schema,
-		state:                    state,
-		pgVersion:                pgMajorVersion,
-		disableVersionSchemas:    rollOpts.disableVersionSchemas,
-		noVersionSchemaForRawSQL: rollOpts.noVersionSchemaForRawSQL,
-		migrationHooks:           rollOpts.migrationHooks,
-		skipValidation:           rollOpts.skipValidation,
+		pgConn:                &db.RDB{DB: conn},
+		logger:                logger,
+		schema:                schema,
+		state:                 state,
+		pgVersion:             pgMajorVersion,
+		disableVersionSchemas: rollOpts.disableVersionSchemas,
+		migrationHooks:        rollOpts.migrationHooks,
+		skipValidation:        rollOpts.skipValidation,
 	}, nil
 }
 
@@ -102,7 +101,7 @@ func setupConn(ctx context.Context, pgURL, schema string, options options) (*sql
 		return nil, err
 	}
 
-	_, err = conn.ExecContext(ctx, "SET LOCAL pgroll.internal to 'TRUE'")
+	_, err = conn.ExecContext(ctx, "SET pgroll.internal TO 'TRUE'")
 	if err != nil {
 		return nil, fmt.Errorf("unable to set pgroll.internal to true: %w", err)
 	}
@@ -149,9 +148,8 @@ func (m *Roll) Schema() string {
 	return m.schema
 }
 
-// Status returns the current migration status
-func (m *Roll) Status(ctx context.Context, schema string) (*state.Status, error) {
-	return m.state.Status(ctx, schema)
+func (m *Roll) UseVersionSchema() bool {
+	return !m.disableVersionSchemas
 }
 
 func (m *Roll) Close() error {

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/xataio/pgroll/internal/testutils"
+	"github.com/xataio/pgroll/pkg/backfill"
 	"github.com/xataio/pgroll/pkg/migrations"
 )
 
@@ -20,7 +21,8 @@ func TestSetCheckConstraint(t *testing.T) {
 			name: "add check constraint",
 			migrations: []migrations.Migration{
 				{
-					Name: "01_add_table",
+					Name:          "01_add_table",
+					VersionSchema: "add_table",
 					Operations: migrations.Operations{
 						&migrations.OpCreateTable{
 							Name: "posts",
@@ -39,7 +41,8 @@ func TestSetCheckConstraint(t *testing.T) {
 					},
 				},
 				{
-					Name: "02_add_check_constraint",
+					Name:          "02_add_check_constraint",
+					VersionSchema: "add_check_constraint",
 					Operations: migrations.Operations{
 						&migrations.OpAlterColumn{
 							Table:  "posts",
@@ -63,35 +66,35 @@ func TestSetCheckConstraint(t *testing.T) {
 				NotInheritableCheckConstraintMustExist(t, db, schema, "posts", "check_title_length")
 
 				// Inserting a row that meets the check constraint into the old view works.
-				MustInsert(t, db, schema, "01_add_table", "posts", map[string]string{
+				MustInsert(t, db, schema, "add_table", "posts", map[string]string{
 					"title": "post by alice",
 				})
 
 				// Inserting a row that does not meet the check constraint into the old view also works.
-				MustInsert(t, db, schema, "01_add_table", "posts", map[string]string{
+				MustInsert(t, db, schema, "add_table", "posts", map[string]string{
 					"title": "b",
 				})
 
 				// Both rows have been backfilled into the new view; the short title has
 				// been rewritten using `up` SQL to meet the length constraint.
-				rows := MustSelect(t, db, schema, "02_add_check_constraint", "posts")
+				rows := MustSelect(t, db, schema, "add_check_constraint", "posts")
 				assert.Equal(t, []map[string]any{
 					{"id": 1, "title": "post by alice"},
 					{"id": 2, "title": "---b"},
 				}, rows)
 
 				// Inserting a row that meets the check constraint into the new view works.
-				MustInsert(t, db, schema, "02_add_check_constraint", "posts", map[string]string{
+				MustInsert(t, db, schema, "add_check_constraint", "posts", map[string]string{
 					"title": "post by carl",
 				})
 
 				// Inserting a row that does not meet the check constraint into the new view fails.
-				MustNotInsert(t, db, schema, "02_add_check_constraint", "posts", map[string]string{
+				MustNotInsert(t, db, schema, "add_check_constraint", "posts", map[string]string{
 					"title": "d",
 				}, testutils.CheckViolationErrorCode)
 
 				// The row that was inserted into the new view has been backfilled into the old view.
-				rows = MustSelect(t, db, schema, "01_add_table", "posts")
+				rows = MustSelect(t, db, schema, "add_table", "posts")
 				assert.Equal(t, []map[string]any{
 					{"id": 1, "title": "post by alice"},
 					{"id": 2, "title": "b"},
@@ -107,17 +110,17 @@ func TestSetCheckConstraint(t *testing.T) {
 				NotInheritableCheckConstraintMustExist(t, db, schema, "posts", "check_title_length")
 
 				// Inserting a row that meets the check constraint into the new view works.
-				MustInsert(t, db, schema, "02_add_check_constraint", "posts", map[string]string{
+				MustInsert(t, db, schema, "add_check_constraint", "posts", map[string]string{
 					"title": "post by dana",
 				})
 
 				// Inserting a row that does not meet the check constraint into the new view fails.
-				MustNotInsert(t, db, schema, "02_add_check_constraint", "posts", map[string]string{
+				MustNotInsert(t, db, schema, "add_check_constraint", "posts", map[string]string{
 					"title": "e",
 				}, testutils.CheckViolationErrorCode)
 
 				// The data in the new `posts` view is as expected.
-				rows := MustSelect(t, db, schema, "02_add_check_constraint", "posts")
+				rows := MustSelect(t, db, schema, "add_check_constraint", "posts")
 				assert.Equal(t, []map[string]any{
 					{"id": 1, "title": "post by alice"},
 					{"id": 2, "title": "---b"},
@@ -126,14 +129,14 @@ func TestSetCheckConstraint(t *testing.T) {
 				}, rows)
 
 				// The up function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", "title"))
+				FunctionMustNotExist(t, db, schema, backfill.TriggerFunctionName("posts", "title"))
 				// The down function no longer exists.
-				FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName("posts", migrations.TemporaryName("title")))
+				FunctionMustNotExist(t, db, schema, backfill.TriggerFunctionName("posts", migrations.TemporaryName("title")))
 
 				// The up trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", "title"))
+				TriggerMustNotExist(t, db, schema, "posts", backfill.TriggerName("posts", "title"))
 				// The down trigger no longer exists.
-				TriggerMustNotExist(t, db, schema, "posts", migrations.TriggerName("posts", migrations.TemporaryName("title")))
+				TriggerMustNotExist(t, db, schema, "posts", backfill.TriggerName("posts", migrations.TemporaryName("title")))
 			},
 		},
 		{

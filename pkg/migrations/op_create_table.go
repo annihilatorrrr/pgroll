@@ -8,13 +8,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/lib/pq"
-
 	"github.com/xataio/pgroll/pkg/db"
 	"github.com/xataio/pgroll/pkg/schema"
 )
 
-var _ Operation = (*OpCreateTable)(nil)
+var (
+	_ Operation  = (*OpCreateTable)(nil)
+	_ Createable = (*OpCreateTable)(nil)
+)
 
 func (o *OpCreateTable) Start(ctx context.Context, l Logger, conn db.DB, latestSchema string, s *schema.Schema) (*schema.Table, error) {
 	l.LogOperationStart(o)
@@ -69,9 +70,7 @@ func (o *OpCreateTable) Complete(ctx context.Context, l Logger, conn db.DB, s *s
 func (o *OpCreateTable) Rollback(ctx context.Context, l Logger, conn db.DB, s *schema.Schema) error {
 	l.LogOperationRollback(o)
 
-	_, err := conn.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s",
-		pq.QuoteIdentifier(o.Name)))
-	return err
+	return NewDropTableAction(conn, o.Name).Execute(ctx)
 }
 
 func (o *OpCreateTable) Validate(ctx context.Context, s *schema.Schema) error {

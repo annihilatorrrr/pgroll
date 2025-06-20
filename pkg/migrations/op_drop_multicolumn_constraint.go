@@ -14,7 +14,10 @@ import (
 	"github.com/xataio/pgroll/pkg/schema"
 )
 
-var _ Operation = (*OpDropMultiColumnConstraint)(nil)
+var (
+	_ Operation  = (*OpDropMultiColumnConstraint)(nil)
+	_ Createable = (*OpDropMultiColumnConstraint)(nil)
+)
 
 func (o *OpDropMultiColumnConstraint) Start(ctx context.Context, l Logger, conn db.DB, latestSchema string, s *schema.Schema) (*schema.Table, error) {
 	l.LogOperationStart(o)
@@ -49,9 +52,9 @@ func (o *OpDropMultiColumnConstraint) Start(ctx context.Context, l Logger, conn 
 	for _, columnName := range table.GetConstraintColumns(o.Name) {
 		// Add a trigger to copy values from the old column to the new, rewriting values using the `up` SQL.
 		err := NewCreateTriggerAction(conn,
-			triggerConfig{
-				Name:           TriggerName(o.Table, columnName),
-				Direction:      TriggerDirectionUp,
+			backfill.TriggerConfig{
+				Name:           backfill.TriggerName(o.Table, columnName),
+				Direction:      backfill.TriggerDirectionUp,
 				Columns:        table.Columns,
 				SchemaName:     s.Name,
 				LatestSchema:   latestSchema,
@@ -75,9 +78,9 @@ func (o *OpDropMultiColumnConstraint) Start(ctx context.Context, l Logger, conn 
 
 		// Add a trigger to copy values from the new column to the old, rewriting values using the `down` SQL.
 		err = NewCreateTriggerAction(conn,
-			triggerConfig{
-				Name:           TriggerName(o.Table, TemporaryName(columnName)),
-				Direction:      TriggerDirectionDown,
+			backfill.TriggerConfig{
+				Name:           backfill.TriggerName(o.Table, TemporaryName(columnName)),
+				Direction:      backfill.TriggerDirectionDown,
 				Columns:        table.Columns,
 				SchemaName:     s.Name,
 				LatestSchema:   latestSchema,
@@ -101,12 +104,12 @@ func (o *OpDropMultiColumnConstraint) Complete(ctx context.Context, l Logger, co
 
 	for _, columnName := range table.GetConstraintColumns(o.Name) {
 		// Remove the up and down function and trigger
-		err := NewDropFunctionAction(conn, TriggerFunctionName(o.Table, columnName), TriggerFunctionName(o.Table, TemporaryName(columnName))).Execute(ctx)
+		err := NewDropFunctionAction(conn, backfill.TriggerFunctionName(o.Table, columnName), backfill.TriggerFunctionName(o.Table, TemporaryName(columnName))).Execute(ctx)
 		if err != nil {
 			return err
 		}
 
-		if err := alterSequenceOwnerToDuplicatedColumn(ctx, conn, o.Table, columnName); err != nil {
+		if err := NewAlterSequenceOwnerAction(conn, o.Table, columnName, TemporaryName(columnName)).Execute(ctx); err != nil {
 			return err
 		}
 
@@ -124,7 +127,7 @@ func (o *OpDropMultiColumnConstraint) Complete(ctx context.Context, l Logger, co
 
 		// Rename the new column to the old column name
 		column := table.GetColumn(columnName)
-		if err := RenameDuplicatedColumn(ctx, conn, table, column); err != nil {
+		if err := NewRenameDuplicatedColumnAction(conn, table, column.Name).Execute(ctx); err != nil {
 			return err
 		}
 	}
@@ -145,7 +148,7 @@ func (o *OpDropMultiColumnConstraint) Rollback(ctx context.Context, l Logger, co
 		}
 
 		// Remove the up and down function and trigger
-		err = NewDropFunctionAction(conn, TriggerFunctionName(o.Table, columnName), TriggerFunctionName(o.Table, TemporaryName(columnName))).Execute(ctx)
+		err = NewDropFunctionAction(conn, backfill.TriggerFunctionName(o.Table, columnName), backfill.TriggerFunctionName(o.Table, TemporaryName(columnName))).Execute(ctx)
 		if err != nil {
 			return err
 		}

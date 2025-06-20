@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xataio/pgroll/internal/testutils"
+	"github.com/xataio/pgroll/pkg/backfill"
 	"github.com/xataio/pgroll/pkg/migrations"
+	"github.com/xataio/pgroll/pkg/roll"
 	"github.com/xataio/pgroll/pkg/schema"
 	"github.com/xataio/pgroll/pkg/state"
 )
@@ -36,8 +37,15 @@ func TestSchemaOptionIsRespected(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// check that starting a new migration returns the already existing table
-		currentSchema, err := state.Start(ctx, "public", &migrations.Migration{
+		// check that we can retrieve the already existing table
+		currentSchema, err := state.ReadSchema(ctx, "public")
+		assert.NoError(t, err)
+
+		assert.Equal(t, 1, len(currentSchema.Tables))
+		assert.Equal(t, "public", currentSchema.Name)
+
+		// check that we can start the migration
+		err = state.Start(ctx, "public", &migrations.Migration{
 			Name: "1_add_column",
 			Operations: migrations.Operations{
 				&migrations.OpAddColumn{
@@ -50,9 +58,6 @@ func TestSchemaOptionIsRespected(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-
-		assert.Equal(t, 1, len(currentSchema.Tables))
-		assert.Equal(t, "public", currentSchema.Name)
 	})
 }
 
@@ -260,14 +265,70 @@ func TestInferredMigration(t *testing.T) {
 				for i, wantMigration := range tt.wantMigrations {
 					gotMigration := gotMigrations[i]
 
-					// test there is a name for the migration, then remove it for the comparison
-					assert.True(t, strings.HasPrefix(gotMigration.Name, "sql_") && len(gotMigration.Name) > 10)
-					gotMigration.Name = ""
-
-					assert.Equal(t, wantMigration, gotMigration)
+					// Ensure that the operations are equal; we don't care about the
+					// randomly generated `VersionSchema` field for the migration.
+					assert.Equal(t, wantMigration.Operations, gotMigration.Operations)
 				}
 			})
 		}
+	})
+}
+
+func TestInferredMigrationsHaveExpectedNamesAndVersionSchema(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an inferred migration first in the history", func(t *testing.T) {
+		testutils.WithStateAndConnectionToContainer(t, func(st *state.State, db *sql.DB) {
+			ctx := context.Background()
+
+			// Execute a SQL DDL statement
+			_, err := db.ExecContext(ctx, "CREATE TABLE table1(id int)")
+			require.NoError(t, err)
+
+			// Get the migration history
+			history, err := st.SchemaHistory(ctx, "public")
+			require.NoError(t, err)
+
+			// Assert that the history contains one migration with the expected name
+			require.Len(t, history, 1)
+			require.Regexp(t, `^00000_initial_\d{20}$`, history[0].Migration.Name)
+			// Assert that the VersionSchema field matches the expected format
+			require.Regexp(t, "^sql_[0-9a-f]{8}", history[0].Migration.VersionSchema)
+		})
+	})
+
+	t.Run("an inferred migration following a pgroll migration", func(t *testing.T) {
+		testutils.WithMigratorAndConnectionToContainer(t, func(m *roll.Roll, db *sql.DB) {
+			ctx := context.Background()
+
+			// Execute a pgroll migration
+			err := m.Start(ctx, &migrations.Migration{
+				Name:       "01_initial_migration",
+				Operations: migrations.Operations{&migrations.OpRawSQL{Up: "SELECT 1"}},
+			}, backfill.NewConfig())
+			require.NoError(t, err)
+
+			// Complete the migration
+			err = m.Complete(ctx)
+			require.NoError(t, err)
+
+			// Execute a SQL DDL statement
+			_, err = db.ExecContext(ctx, "CREATE TABLE table1(id int)")
+			require.NoError(t, err)
+
+			// Get the migration history
+			history, err := m.State().SchemaHistory(ctx, "public")
+			require.NoError(t, err)
+
+			// Assert that the history contains two migrations with the expected
+			// names. The inferred migration should have a name that starts with
+			// the name of the preceding pgroll migration followed by a timestamp.
+			require.Len(t, history, 2)
+			require.Equal(t, "01_initial_migration", history[0].Migration.Name)
+			require.Regexp(t, `^01_initial_migration_\d{20}$`, history[1].Migration.Name)
+			// Assert that the VersionSchema field matches the expected format
+			require.Regexp(t, "^sql_[0-9a-f]{8}", history[1].Migration.VersionSchema)
+		})
 	})
 }
 
@@ -413,14 +474,7 @@ func TestReadSchema(t *testing.T) {
 					Name: "public",
 					Tables: map[string]*schema.Table{
 						"table1": {
-							Name:               "table1",
-							Columns:            map[string]*schema.Column{},
-							PrimaryKey:         []string{},
-							Indexes:            map[string]*schema.Index{},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
+							Name: "table1",
 						},
 					},
 				},
@@ -441,12 +495,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey:         []string{},
-							Indexes:            map[string]*schema.Index{},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
 						},
 					},
 				},
@@ -468,7 +516,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
 							Indexes: map[string]*schema.Index{
 								"id_unique": {
 									Name:       "id_unique",
@@ -478,15 +525,12 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX id_unique ON public.table1 USING btree (id)",
 								},
 							},
-							CheckConstraints: map[string]*schema.CheckConstraint{},
 							UniqueConstraints: map[string]*schema.UniqueConstraint{
 								"id_unique": {
 									Name:    "id_unique",
 									Columns: []string{"id"},
 								},
 							},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
 						},
 					},
 				},
@@ -513,7 +557,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
 							Indexes: map[string]*schema.Index{
 								"idx_name": {
 									Name:       "idx_name",
@@ -523,10 +566,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE INDEX idx_name ON public.table1 USING btree (name)",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
 						},
 					},
 				},
@@ -558,10 +597,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX table1_pkey ON public.table1 USING btree (id)",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
 						},
 						"table2": {
 							Name: "table2",
@@ -573,8 +608,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
-							Indexes:    map[string]*schema.Index{},
 							ForeignKeys: map[string]*schema.ForeignKey{
 								"fk_fkey": {
 									Name:              "fk_fkey",
@@ -586,9 +619,6 @@ func TestReadSchema(t *testing.T) {
 									OnUpdate:          "NO ACTION",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -620,10 +650,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX table1_pkey ON public.table1 USING btree (id)",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
 						},
 						"table2": {
 							Name: "table2",
@@ -635,8 +661,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
-							Indexes:    map[string]*schema.Index{},
 							ForeignKeys: map[string]*schema.ForeignKey{
 								"fk_fkey": {
 									Name:              "fk_fkey",
@@ -648,9 +672,6 @@ func TestReadSchema(t *testing.T) {
 									OnUpdate:          "NO ACTION",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -682,10 +703,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX table1_pkey ON public.table1 USING btree (id)",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
 						},
 						"table2": {
 							Name: "table2",
@@ -697,8 +714,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
-							Indexes:    map[string]*schema.Index{},
 							ForeignKeys: map[string]*schema.ForeignKey{
 								"fk_fkey": {
 									Name:              "fk_fkey",
@@ -710,9 +725,6 @@ func TestReadSchema(t *testing.T) {
 									OnUpdate:          "CASCADE",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -744,10 +756,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX table1_pkey ON public.table1 USING btree (id)",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
 						},
 						"table2": {
 							Name: "table2",
@@ -759,8 +767,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
-							Indexes:    map[string]*schema.Index{},
 							ForeignKeys: map[string]*schema.ForeignKey{
 								"fk_fkey": {
 									Name:              "fk_fkey",
@@ -772,9 +778,6 @@ func TestReadSchema(t *testing.T) {
 									OnUpdate:          "NO ACTION",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -812,7 +815,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX table1_pkey ON public.table1 USING btree (id)",
 								},
 							},
-							ForeignKeys: map[string]*schema.ForeignKey{},
 							CheckConstraints: map[string]*schema.CheckConstraint{
 								"age_check": {
 									Name:       "age_check",
@@ -821,8 +823,6 @@ func TestReadSchema(t *testing.T) {
 									NoInherit:  false,
 								},
 							},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -843,9 +843,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey:  []string{},
-							Indexes:     map[string]*schema.Index{},
-							ForeignKeys: map[string]*schema.ForeignKey{},
 							CheckConstraints: map[string]*schema.CheckConstraint{
 								"age_check": {
 									Name:       "age_check",
@@ -854,8 +851,6 @@ func TestReadSchema(t *testing.T) {
 									NoInherit:  true,
 								},
 							},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -901,15 +896,12 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX name_unique ON public.table1 USING btree (name)",
 								},
 							},
-							ForeignKeys:      map[string]*schema.ForeignKey{},
-							CheckConstraints: map[string]*schema.CheckConstraint{},
 							UniqueConstraints: map[string]*schema.UniqueConstraint{
 								"name_unique": {
 									Name:    "name_unique",
 									Columns: []string{"name"},
 								},
 							},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -955,15 +947,12 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX name_id_unique ON public.table1 USING btree (id, name)",
 								},
 							},
-							ForeignKeys:      map[string]*schema.ForeignKey{},
-							CheckConstraints: map[string]*schema.CheckConstraint{},
 							UniqueConstraints: map[string]*schema.UniqueConstraint{
 								"name_id_unique": {
 									Name:    "name_id_unique",
 									Columns: []string{"id", "name"},
 								},
 							},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -984,7 +973,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
 							Indexes: map[string]*schema.Index{
 								"name_unique": {
 									Name:       "name_unique",
@@ -995,9 +983,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE INDEX name_unique ON public.table1 USING btree (name)",
 								},
 							},
-							ForeignKeys:       map[string]*schema.ForeignKey{},
-							CheckConstraints:  map[string]*schema.CheckConstraint{},
-							UniqueConstraints: map[string]*schema.UniqueConstraint{},
 							ExcludeConstraints: map[string]*schema.ExcludeConstraint{
 								"name_unique": {
 									Name:       "name_unique",
@@ -1050,10 +1035,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX products_pkey ON public.products USING btree (customer_id, product_id)",
 								},
 							},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 						"orders": {
 							Name: "orders",
@@ -1071,8 +1052,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
-							Indexes:    map[string]*schema.Index{},
 							ForeignKeys: map[string]*schema.ForeignKey{
 								"fk_customer_product": {
 									Name:              "fk_customer_product",
@@ -1084,9 +1063,6 @@ func TestReadSchema(t *testing.T) {
 									OnUpdate:          "NO ACTION",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -1131,10 +1107,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE UNIQUE INDEX products_pkey ON public.products USING btree (customer_id, product_id)",
 								},
 							},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 						"orders": {
 							Name: "orders",
@@ -1152,8 +1124,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
-							Indexes:    map[string]*schema.Index{},
 							ForeignKeys: map[string]*schema.ForeignKey{
 								"fk_customer_product": {
 									Name:              "fk_customer_product",
@@ -1165,9 +1135,6 @@ func TestReadSchema(t *testing.T) {
 									OnUpdate:          "CASCADE",
 								},
 							},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -1194,7 +1161,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "base",
 								},
 							},
-							PrimaryKey: []string{},
 							Indexes: map[string]*schema.Index{
 								"idx_ab": {
 									Name:       "idx_ab",
@@ -1204,10 +1170,6 @@ func TestReadSchema(t *testing.T) {
 									Definition: "CREATE INDEX idx_ab ON public.table1 USING btree (a, b)",
 								},
 							},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -1228,12 +1190,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "domain",
 								},
 							},
-							PrimaryKey:         []string{},
-							Indexes:            map[string]*schema.Index{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -1261,12 +1217,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "enum",
 								},
 							},
-							PrimaryKey:         []string{},
-							Indexes:            map[string]*schema.Index{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -1321,12 +1271,6 @@ func TestReadSchema(t *testing.T) {
 									PostgresType: "domain",
 								},
 							},
-							PrimaryKey:         []string{},
-							Indexes:            map[string]*schema.Index{},
-							ForeignKeys:        map[string]*schema.ForeignKey{},
-							CheckConstraints:   map[string]*schema.CheckConstraint{},
-							UniqueConstraints:  map[string]*schema.UniqueConstraint{},
-							ExcludeConstraints: map[string]*schema.ExcludeConstraint{},
 						},
 					},
 				},
@@ -1352,6 +1296,85 @@ func TestReadSchema(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestPgrollSchemaVersionUpgrades(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name                  string
+		initialSchemaVersion  string
+		pgrollVersion         string
+		expectedSchemaVersion string
+		expectedError         error
+	}{
+		{
+			name:                  "pgroll schema is older than the pgroll version - pgroll schema is updated",
+			initialSchemaVersion:  "0.13.0",
+			pgrollVersion:         "0.14.0",
+			expectedSchemaVersion: "0.14.0",
+		},
+		{
+			name:                 "pgroll schema is newer than the pgroll version - state initialization fails",
+			initialSchemaVersion: "0.15.0",
+			pgrollVersion:        "0.14.0",
+			expectedError:        state.ErrNewPgrollSchema,
+		},
+		{
+			name:                  "pgroll schema is the same as the pgroll version - pgroll schema is not updated",
+			initialSchemaVersion:  "0.13.0",
+			pgrollVersion:         "0.13.0",
+			expectedSchemaVersion: "0.13.0",
+		},
+		{
+			name:                  "development versions of pgroll never cause a pgroll schema update",
+			initialSchemaVersion:  "0.13.0",
+			pgrollVersion:         "development",
+			expectedSchemaVersion: "0.13.0",
+		},
+		{
+			name:                  "development versions of the pgroll schema are never upgraded",
+			initialSchemaVersion:  "development",
+			pgrollVersion:         "0.13.0",
+			expectedSchemaVersion: "development",
+		},
+		{
+			name:                  "invalid pgroll version - pgroll schema is not updated",
+			initialSchemaVersion:  "0.14.0",
+			pgrollVersion:         "banana",
+			expectedSchemaVersion: "0.14.0",
+		},
+		{
+			name:                  "invalid pgroll schema version - pgroll schema is not updated",
+			initialSchemaVersion:  "banana",
+			pgrollVersion:         "0.14.0",
+			expectedSchemaVersion: "banana",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testutils.WithStateAtVersionAndConnectionToContainer(t, tt.initialSchemaVersion, func(st *state.State, connStr string, _ *sql.DB) {
+				// Create a new state instance with the specified pgroll version. This
+				// will upgrade the pgroll schema if necessary.
+				s, err := state.New(ctx, connStr, "pgroll", state.WithPgrollVersion(tt.pgrollVersion))
+
+				if tt.expectedError != nil {
+					require.ErrorIs(t, err, tt.expectedError)
+				} else {
+					require.NoError(t, err)
+					// Get the version of the pgroll schema
+					schemaVersion, err := s.SchemaVersion(ctx)
+					require.NoError(t, err)
+
+					// Ensure the expected pgroll schema version
+					require.Equal(t, tt.expectedSchemaVersion, schemaVersion)
+				}
+			})
+		})
+	}
 }
 
 func clearOIDS(s *schema.Schema) {

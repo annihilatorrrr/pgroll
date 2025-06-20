@@ -575,7 +575,7 @@ func triggerExists(t *testing.T, db *sql.DB, schema, table, trigger string) bool
       WHERE tgrelid = $1::regclass
       AND tgname = $2
     )`,
-		fmt.Sprintf("%s.%s", schema, table), trigger).Scan(&exists)
+		fmt.Sprintf("%s.%s", pq.QuoteIdentifier(schema), pq.QuoteIdentifier(table)), trigger).Scan(&exists)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -783,6 +783,39 @@ func MustInsert(t *testing.T, db *sql.DB, schema, version, table string, record 
 	}
 }
 
+func MustUpdate(t *testing.T, db *sql.DB, schema, version, table, column, value string, record map[string]string) {
+	t.Helper()
+
+	if err := update(t, db, schema, version, table, column, value, record); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func update(t *testing.T, db *sql.DB, schema, version, table, column, value string, record map[string]string) error {
+	t.Helper()
+	versionSchema := roll.VersionedSchemaName(schema, version)
+
+	mustSetSearchPath(t, db, versionSchema)
+
+	cols := slices.Collect(maps.Keys(record))
+	slices.Sort(cols)
+
+	recordStr := "SET "
+	for i, c := range cols {
+		if i > 0 {
+			recordStr += ", "
+		}
+		recordStr += c + "=" + record[c]
+	}
+	recordStr += " WHERE " + column + "=" + value
+
+	//nolint:gosec // this is a test so we don't care about SQL injection
+	stmt := fmt.Sprintf("UPDATE %s.%s %s", versionSchema, table, recordStr)
+
+	_, err := db.Exec(stmt)
+	return err
+}
+
 func MustNotInsert(t *testing.T, db *sql.DB, schema, version, table string, record map[string]string, errorCode string) {
 	t.Helper()
 
@@ -948,14 +981,14 @@ func TableMustBeCleanedUp(t *testing.T, db *sql.DB, schema, table string, column
 		ColumnMustNotExist(t, db, schema, table, backfill.CNeedsBackfillColumn)
 
 		// The up function for the column no longer exists.
-		FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName(table, column))
+		FunctionMustNotExist(t, db, schema, backfill.TriggerFunctionName(table, column))
 		// The down function for the column no longer exists.
-		FunctionMustNotExist(t, db, schema, migrations.TriggerFunctionName(table, migrations.TemporaryName(column)))
+		FunctionMustNotExist(t, db, schema, backfill.TriggerFunctionName(table, migrations.TemporaryName(column)))
 
 		// The up trigger for the column no longer exists.
-		TriggerMustNotExist(t, db, schema, table, migrations.TriggerName(table, column))
+		TriggerMustNotExist(t, db, schema, table, backfill.TriggerName(table, column))
 		// The down trigger for the column no longer exists.
-		TriggerMustNotExist(t, db, schema, table, migrations.TriggerName(table, migrations.TemporaryName(column)))
+		TriggerMustNotExist(t, db, schema, table, backfill.TriggerName(table, migrations.TemporaryName(column)))
 	}
 }
 

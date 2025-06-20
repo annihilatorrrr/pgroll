@@ -6,10 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 
 	_ "github.com/lib/pq"
-	"sigs.k8s.io/yaml"
 
 	"github.com/xataio/pgroll/pkg/db"
 	"github.com/xataio/pgroll/pkg/schema"
@@ -36,6 +34,22 @@ type Operation interface {
 	Validate(ctx context.Context, s *schema.Schema) error
 }
 
+// Createable interface must be implemented for all operations
+// that can be created using the CLI create command.
+//
+// The function must prompt users to configure all attributes of an operation.
+//
+// Example implementation for OpMyOperation that has 3 attributes: table, column and down:
+//
+//	func (o *OpMyOperation) Create() {
+//		o.Table, _ = pterm.DefaultInteractiveTextInput.WithDefaultText("table").Show()
+//		o.Column, _ = pterm.DefaultInteractiveTextInput.WithDefaultText("column").Show()
+//		o.Down, _ = pterm.DefaultInteractiveTextInput.WithDefaultText("down").Show()
+//	}
+type Createable interface {
+	Create()
+}
+
 // IsolatedOperation is an operation that cannot be executed with other operations
 // in the same migration.
 type IsolatedOperation interface {
@@ -54,11 +68,25 @@ type RequiresSchemaRefreshOperation interface {
 type (
 	Operations []Operation
 	Migration  struct {
-		Name string `json:"name,omitempty"`
-
-		Operations Operations `json:"operations"`
+		Name          string     `json:"-"`
+		VersionSchema string     `json:"version_schema,omitempty"`
+		Operations    Operations `json:"operations"`
+	}
+	RawMigration struct {
+		Name          string          `json:"-"`
+		VersionSchema string          `json:"version_schema,omitempty"`
+		Operations    json.RawMessage `json:"operations"`
 	}
 )
+
+// VersionSchemaName returns the version schema name for the migration.
+// It defaults to the migration name if no version schema is set.
+func (m *Migration) VersionSchemaName() string {
+	if m.VersionSchema != "" {
+		return m.VersionSchema
+	}
+	return m.Name
+}
 
 // Validate will check that the migration can be applied to the given schema
 // returns a descriptive error if the migration is invalid
@@ -94,33 +122,4 @@ func (m *Migration) UpdateVirtualSchema(ctx context.Context, s *schema.Schema) e
 		}
 	}
 	return nil
-}
-
-// ContainsRawSQLOperation returns true if the migration contains a raw SQL operation
-func (m *Migration) ContainsRawSQLOperation() bool {
-	for _, op := range m.Operations {
-		if _, ok := op.(*OpRawSQL); ok {
-			return true
-		}
-	}
-	return false
-}
-
-// WriteAsJSON writes the migration to the given writer in JSON format
-func (m *Migration) WriteAsJSON(w io.Writer) error {
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
-
-	return encoder.Encode(m)
-}
-
-// WriteAsYAML writes the migration to the given writer in YAML format
-func (m *Migration) WriteAsYAML(w io.Writer) error {
-	yml, err := yaml.Marshal(m)
-	if err != nil {
-		return err
-	}
-
-	_, err = w.Write(yml)
-	return err
 }

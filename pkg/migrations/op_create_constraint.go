@@ -6,14 +6,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lib/pq"
-
 	"github.com/xataio/pgroll/pkg/backfill"
 	"github.com/xataio/pgroll/pkg/db"
 	"github.com/xataio/pgroll/pkg/schema"
 )
 
-var _ Operation = (*OpCreateConstraint)(nil)
+var (
+	_ Operation  = (*OpCreateConstraint)(nil)
+	_ Createable = (*OpCreateConstraint)(nil)
+)
 
 func (o *OpCreateConstraint) Start(ctx context.Context, l Logger, conn db.DB, latestSchema string, s *schema.Schema) (*schema.Table, error) {
 	l.LogOperationStart(o)
@@ -44,9 +45,9 @@ func (o *OpCreateConstraint) Start(ctx context.Context, l Logger, conn db.DB, la
 	for _, colName := range o.Columns {
 		upSQL := o.Up[colName]
 		err := NewCreateTriggerAction(conn,
-			triggerConfig{
-				Name:           TriggerName(o.Table, colName),
-				Direction:      TriggerDirectionUp,
+			backfill.TriggerConfig{
+				Name:           backfill.TriggerName(o.Table, colName),
+				Direction:      backfill.TriggerDirectionUp,
 				Columns:        table.Columns,
 				SchemaName:     s.Name,
 				LatestSchema:   latestSchema,
@@ -70,9 +71,9 @@ func (o *OpCreateConstraint) Start(ctx context.Context, l Logger, conn db.DB, la
 
 		downSQL := o.Down[colName]
 		err = NewCreateTriggerAction(conn,
-			triggerConfig{
-				Name:           TriggerName(o.Table, TemporaryName(colName)),
-				Direction:      TriggerDirectionDown,
+			backfill.TriggerConfig{
+				Name:           backfill.TriggerName(o.Table, TemporaryName(colName)),
+				Direction:      backfill.TriggerDirectionDown,
 				Columns:        table.Columns,
 				LatestSchema:   latestSchema,
 				SchemaName:     s.Name,
@@ -90,9 +91,9 @@ func (o *OpCreateConstraint) Start(ctx context.Context, l Logger, conn db.DB, la
 	case OpCreateConstraintTypeUnique, OpCreateConstraintTypePrimaryKey:
 		return table, NewCreateUniqueIndexConcurrentlyAction(conn, s.Name, o.Name, table.Name, temporaryNames(o.Columns)...).Execute(ctx)
 	case OpCreateConstraintTypeCheck:
-		return table, o.addCheckConstraint(ctx, conn, table.Name)
+		return table, NewCreateCheckConstraintAction(conn, table.Name, o.Name, *o.Check, o.Columns, o.NoInherit, true).Execute(ctx)
 	case OpCreateConstraintTypeForeignKey:
-		return table, o.addForeignKeyConstraint(ctx, conn, table)
+		return table, NewCreateFKConstraintAction(conn, table.Name, o.Name, temporaryNames(o.Columns), o.References, false, false, true).Execute(ctx)
 	}
 
 	return table, nil
@@ -134,17 +135,14 @@ func (o *OpCreateConstraint) Complete(ctx context.Context, l Logger, conn db.DB,
 			return err
 		}
 	case OpCreateConstraintTypePrimaryKey:
-		_, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD PRIMARY KEY USING INDEX %s",
-			pq.QuoteIdentifier(o.Table),
-			pq.QuoteIdentifier(o.Name),
-		))
+		err := NewAddPrimaryKeyAction(conn, o.Table, o.Name).Execute(ctx)
 		if err != nil {
 			return err
 		}
 	}
 
 	for _, col := range o.Columns {
-		if err := alterSequenceOwnerToDuplicatedColumn(ctx, conn, o.Table, col); err != nil {
+		if err := NewAlterSequenceOwnerAction(conn, o.Table, col, TemporaryName(col)).Execute(ctx); err != nil {
 			return err
 		}
 	}
@@ -165,7 +163,7 @@ func (o *OpCreateConstraint) Complete(ctx context.Context, l Logger, conn db.DB,
 		if column == nil {
 			return ColumnDoesNotExistError{Table: o.Table, Name: col}
 		}
-		if err := RenameDuplicatedColumn(ctx, conn, table, column); err != nil {
+		if err := NewRenameDuplicatedColumnAction(conn, table, column.Name).Execute(ctx); err != nil {
 			return err
 		}
 	}
@@ -207,8 +205,8 @@ func (o *OpCreateConstraint) Rollback(ctx context.Context, l Logger, conn db.DB,
 func (o *OpCreateConstraint) removeTriggers(ctx context.Context, conn db.DB) error {
 	dropFuncs := make([]string, 0, len(o.Columns)*2)
 	for _, column := range o.Columns {
-		dropFuncs = append(dropFuncs, TriggerFunctionName(o.Table, column))
-		dropFuncs = append(dropFuncs, TriggerFunctionName(o.Table, TemporaryName(column)))
+		dropFuncs = append(dropFuncs, backfill.TriggerFunctionName(o.Table, column))
+		dropFuncs = append(dropFuncs, backfill.TriggerFunctionName(o.Table, TemporaryName(column)))
 	}
 	return NewDropFunctionAction(conn, dropFuncs...).Execute(ctx)
 }
@@ -279,40 +277,6 @@ func (o *OpCreateConstraint) Validate(ctx context.Context, s *schema.Schema) err
 	}
 
 	return nil
-}
-
-func (o *OpCreateConstraint) addCheckConstraint(ctx context.Context, conn db.DB, tableName string) error {
-	sql := fmt.Sprintf("ALTER TABLE %s ADD ", pq.QuoteIdentifier(tableName))
-
-	writer := &ConstraintSQLWriter{
-		Name:           o.Name,
-		SkipValidation: true,
-	}
-	sql += writer.WriteCheck(rewriteCheckExpression(*o.Check, o.Columns...), o.NoInherit)
-	_, err := conn.ExecContext(ctx, sql)
-	return err
-}
-
-func (o *OpCreateConstraint) addForeignKeyConstraint(ctx context.Context, conn db.DB, table *schema.Table) error {
-	sql := fmt.Sprintf("ALTER TABLE %s ADD ", pq.QuoteIdentifier(table.Name))
-
-	writer := &ConstraintSQLWriter{
-		Name:           o.Name,
-		Columns:        temporaryNames(o.Columns),
-		SkipValidation: true,
-	}
-	sql += writer.WriteForeignKey(
-		o.References.Table,
-		o.References.Columns,
-		o.References.OnDelete,
-		o.References.OnUpdate,
-		o.References.OnDeleteSetColumns,
-		o.References.MatchType,
-	)
-
-	_, err := conn.ExecContext(ctx, sql)
-
-	return err
 }
 
 func temporaryNames(columns []string) []string {

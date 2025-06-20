@@ -18,6 +18,34 @@ type DBAction interface {
 	Execute(context.Context) error
 }
 
+type addColumnAction struct {
+	conn   db.DB
+	table  string
+	column Column
+	withPK bool
+}
+
+func NewAddColumnAction(conn db.DB, table string, c Column, withPK bool) *addColumnAction {
+	return &addColumnAction{
+		conn:   conn,
+		table:  table,
+		column: c,
+	}
+}
+
+func (a *addColumnAction) Execute(ctx context.Context) error {
+	colSQL, err := ColumnSQLWriter{WithPK: a.withPK}.Write(a.column)
+	if err != nil {
+		return err
+	}
+
+	_, err = a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s",
+		pq.QuoteIdentifier(a.table),
+		colSQL,
+	))
+	return err
+}
+
 // dropColumnAction is a DBAction that drops one or more columns from a table.
 type dropColumnAction struct {
 	conn db.DB
@@ -47,6 +75,29 @@ func (a *dropColumnAction) dropMultipleColumns() string {
 		cols[i] = "DROP COLUMN IF EXISTS " + pq.QuoteIdentifier(col)
 	}
 	return strings.Join(cols, ", ")
+}
+
+// renameTableAction is a DBAction that renames a table.
+type renameTableAction struct {
+	conn db.DB
+
+	from string
+	to   string
+}
+
+func NewRenameTableAction(conn db.DB, from, to string) *renameTableAction {
+	return &renameTableAction{
+		conn: conn,
+		from: from,
+		to:   to,
+	}
+}
+
+func (a *renameTableAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s RENAME TO %s",
+		pq.QuoteIdentifier(a.from),
+		pq.QuoteIdentifier(a.to)))
+	return err
 }
 
 // renameColumnAction is a DBAction that renames a column in a table.
@@ -97,6 +148,52 @@ func (a *renameConstraintAction) Execute(ctx context.Context) error {
 		pq.QuoteIdentifier(a.table),
 		pq.QuoteIdentifier(a.from),
 		pq.QuoteIdentifier(a.to)))
+	return err
+}
+
+type addConstraintUsingUniqueIndexAction struct {
+	conn       db.DB
+	table      string
+	constraint string
+	indexName  string
+}
+
+func NewAddConstraintUsingUniqueIndex(conn db.DB, table, constraint, indexName string) *addConstraintUsingUniqueIndexAction {
+	return &addConstraintUsingUniqueIndexAction{
+		conn:       conn,
+		table:      table,
+		constraint: constraint,
+		indexName:  indexName,
+	}
+}
+
+func (a *addConstraintUsingUniqueIndexAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s ADD CONSTRAINT %s UNIQUE USING INDEX %s",
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.constraint),
+		pq.QuoteIdentifier(a.indexName)))
+	return err
+}
+
+type addPrimaryKeyAction struct {
+	conn      db.DB
+	table     string
+	indexName string
+}
+
+func NewAddPrimaryKeyAction(conn db.DB, table, indexName string) *addPrimaryKeyAction {
+	return &addPrimaryKeyAction{
+		conn:      conn,
+		table:     table,
+		indexName: indexName,
+	}
+}
+
+func (a *addPrimaryKeyAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD PRIMARY KEY USING INDEX %s",
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.indexName),
+	))
 	return err
 }
 
@@ -370,5 +467,272 @@ func NewDropTableAction(conn db.DB, table string) *DropTableAction {
 func (a *DropTableAction) Execute(ctx context.Context) error {
 	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s",
 		pq.QuoteIdentifier(a.table)))
+	return err
+}
+
+// validateConstraintAction is a DBAction that validates a constraint in a table.
+type validateConstraintAction struct {
+	conn       db.DB
+	table      string
+	constraint string
+}
+
+func NewValidateConstraintAction(conn db.DB, table, constraint string) *validateConstraintAction {
+	return &validateConstraintAction{
+		conn:       conn,
+		table:      table,
+		constraint: constraint,
+	}
+}
+
+func (a *validateConstraintAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s VALIDATE CONSTRAINT %s",
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.constraint)))
+	return err
+}
+
+// CreateCheckConstraintAction creates a check constraint on a table.
+type CreateCheckConstraintAction struct {
+	conn           db.DB
+	table          string
+	columns        []string
+	constraint     string
+	check          string
+	noInherit      bool
+	skipValidation bool
+}
+
+func NewCreateCheckConstraintAction(conn db.DB, table, constraint, check string, columns []string, noInherit, skipValidation bool) *CreateCheckConstraintAction {
+	return &CreateCheckConstraintAction{
+		conn:           conn,
+		table:          table,
+		columns:        columns,
+		check:          check,
+		constraint:     constraint,
+		noInherit:      noInherit,
+		skipValidation: skipValidation,
+	}
+}
+
+func (a *CreateCheckConstraintAction) Execute(ctx context.Context) error {
+	sql := fmt.Sprintf("ALTER TABLE %s ADD ", pq.QuoteIdentifier(a.table))
+
+	writer := &ConstraintSQLWriter{
+		Name:           a.constraint,
+		SkipValidation: a.skipValidation,
+	}
+	sql += writer.WriteCheck(rewriteCheckExpression(a.check, a.columns...), a.noInherit)
+	_, err := a.conn.ExecContext(ctx, sql)
+	return err
+}
+
+// In order for the `check` expression to be easy to write, migration authors specify
+// the check expression as though it were being applied to the old column,
+// On migration start, however, the check is actually applied to the new (temporary)
+// column.
+// This function naively rewrites the check expression to apply to the new column.
+func rewriteCheckExpression(check string, columns ...string) string {
+	for _, col := range columns {
+		check = strings.ReplaceAll(check, col, TemporaryName(col))
+	}
+	return check
+}
+
+// createFKConstraintAction is a DBAction that creates a new foreign key constraint
+type createFKConstraintAction struct {
+	conn              db.DB
+	table             string
+	constraint        string
+	columns           []string
+	initiallyDeferred bool
+	deferrable        bool
+	reference         *TableForeignKeyReference
+	skipValidation    bool
+}
+
+func NewCreateFKConstraintAction(conn db.DB, table, constraint string, columns []string, reference *TableForeignKeyReference, initiallyDeferred, deferrable, skipValidation bool) *createFKConstraintAction {
+	return &createFKConstraintAction{
+		conn:              conn,
+		table:             table,
+		constraint:        constraint,
+		columns:           columns,
+		reference:         reference,
+		initiallyDeferred: initiallyDeferred,
+		deferrable:        deferrable,
+		skipValidation:    skipValidation,
+	}
+}
+
+func (a *createFKConstraintAction) Execute(ctx context.Context) error {
+	sql := fmt.Sprintf("ALTER TABLE %s ADD ", pq.QuoteIdentifier(a.table))
+	writer := &ConstraintSQLWriter{
+		Name:              a.constraint,
+		Columns:           a.columns,
+		InitiallyDeferred: a.initiallyDeferred,
+		Deferrable:        a.deferrable,
+		SkipValidation:    a.skipValidation,
+	}
+	sql += writer.WriteForeignKey(
+		a.reference.Table,
+		a.reference.Columns,
+		a.reference.OnDelete,
+		a.reference.OnUpdate,
+		a.reference.OnDeleteSetColumns,
+		a.reference.MatchType)
+
+	_, err := a.conn.ExecContext(ctx, sql)
+	return err
+}
+
+type alterSequenceOwnerAction struct {
+	conn  db.DB
+	table string
+	from  string
+	to    string
+}
+
+func NewAlterSequenceOwnerAction(conn db.DB, table, from, to string) *alterSequenceOwnerAction {
+	return &alterSequenceOwnerAction{
+		conn:  conn,
+		table: table,
+		from:  from,
+		to:    to,
+	}
+}
+
+func (a *alterSequenceOwnerAction) Execute(ctx context.Context) error {
+	sequence := getSequenceNameForColumn(ctx, a.conn, a.table, a.from)
+	if sequence == "" {
+		return nil
+	}
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER SEQUENCE IF EXISTS %s OWNED BY %s.%s",
+		sequence,
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.to),
+	))
+
+	return err
+}
+
+func getSequenceNameForColumn(ctx context.Context, conn db.DB, tableName, columnName string) string {
+	var sequenceName string
+	query := fmt.Sprintf(`
+		SELECT pg_get_serial_sequence('%s', '%s')
+	`, pq.QuoteIdentifier(tableName), columnName)
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+
+	if err := db.ScanFirstValue(rows, &sequenceName); err != nil {
+		return ""
+	}
+
+	return sequenceName
+}
+
+type dropConstraintAction struct {
+	conn       db.DB
+	table      string
+	constraint string
+}
+
+func NewDropConstraintAction(conn db.DB, table, constraint string) *dropConstraintAction {
+	return &dropConstraintAction{
+		conn:       conn,
+		table:      table,
+		constraint: constraint,
+	}
+}
+
+func (a *dropConstraintAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s DROP CONSTRAINT IF EXISTS %s",
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.constraint)))
+	return err
+}
+
+type setNotNullAction struct {
+	conn   db.DB
+	table  string
+	column string
+}
+
+func NewSetNotNullAction(conn db.DB, table, column string) *setNotNullAction {
+	return &setNotNullAction{
+		conn:   conn,
+		table:  table,
+		column: column,
+	}
+}
+
+func (a *setNotNullAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s ALTER COLUMN %s SET NOT NULL",
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.column)))
+	return err
+}
+
+type setDefaultAction struct {
+	conn         db.DB
+	table        string
+	column       string
+	defaultValue string
+}
+
+func NewSetDefaultValueAction(conn db.DB, table, column, defaultValue string) *setDefaultAction {
+	return &setDefaultAction{
+		conn:         conn,
+		table:        table,
+		column:       column,
+		defaultValue: defaultValue,
+	}
+}
+
+func (a *setDefaultAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s ALTER COLUMN %s SET DEFAULT %s",
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.column),
+		a.defaultValue))
+	return err
+}
+
+type dropDefaultAction struct {
+	conn   db.DB
+	table  string
+	column string
+}
+
+func NewDropDefaultValueAction(conn db.DB, table, column string) *dropDefaultAction {
+	return &dropDefaultAction{
+		conn:   conn,
+		table:  table,
+		column: column,
+	}
+}
+
+func (a *dropDefaultAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE IF EXISTS %s ALTER COLUMN %s DROP DEFAULT",
+		pq.QuoteIdentifier(a.table),
+		pq.QuoteIdentifier(a.column)))
+	return err
+}
+
+type rawSQLAction struct {
+	conn db.DB
+	sql  string
+}
+
+func NewRawSQLAction(conn db.DB, sql string) *rawSQLAction {
+	return &rawSQLAction{
+		conn: conn,
+		sql:  sql,
+	}
+}
+
+func (a *rawSQLAction) Execute(ctx context.Context) error {
+	_, err := a.conn.ExecContext(ctx, a.sql)
 	return err
 }

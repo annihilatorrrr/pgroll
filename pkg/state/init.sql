@@ -31,10 +31,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS history_is_linear ON placeholder.migrations (s
 ALTER TABLE placeholder.migrations
     ADD COLUMN IF NOT EXISTS migration_type varchar(32) DEFAULT 'pgroll' CONSTRAINT migration_type_check CHECK (migration_type IN ('pgroll', 'inferred'));
 
+-- Update the `migration_type` column to also allow a `baseline` migration type.
+ALTER TABLE placeholder.migrations
+    DROP CONSTRAINT migration_type_check;
+
+ALTER TABLE placeholder.migrations
+    ADD CONSTRAINT migration_type_check CHECK (migration_type IN ('pgroll', 'inferred', 'baseline'));
+
 -- Change timestamp columns to use timestamptz
 ALTER TABLE placeholder.migrations
     ALTER COLUMN created_at SET DATA TYPE timestamptz USING created_at AT TIME ZONE 'UTC',
     ALTER COLUMN updated_at SET DATA TYPE timestamptz USING updated_at AT TIME ZONE 'UTC';
+
+-- Table to track pgroll binary version
+CREATE TABLE IF NOT EXISTS placeholder.pgroll_version (
+    version text NOT NULL,
+    initialized_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (version)
+);
 
 -- Helper functions
 -- Are we in the middle of a migration?
@@ -54,8 +68,10 @@ $$
 LANGUAGE SQL
 STABLE;
 
--- Get the latest version name (this is the one with child migrations)
-CREATE OR REPLACE FUNCTION placeholder.latest_version (schemaname name)
+-- Get the name of the latest migration, or NULL if there is none.
+-- This will be the same as the version-schema name of the migration in most
+-- cases, unless the migration sets its `versionSchema` field.
+CREATE OR REPLACE FUNCTION placeholder.latest_migration (schemaname name)
     RETURNS text
     SECURITY DEFINER
     SET search_path = placeholder, pg_catalog, pg_temp
@@ -78,30 +94,47 @@ $$
 LANGUAGE SQL
 STABLE;
 
--- Get the name of the previous version of the schema, or NULL if there is none.
--- This ignores previous versions for which no version schema exists, such as
--- versions corresponding to inferred migrations.
-CREATE OR REPLACE FUNCTION placeholder.previous_version (schemaname name, includeInferred boolean)
+-- Get the name of the previous migration, or NULL if there is none.
+CREATE OR REPLACE FUNCTION placeholder.previous_migration (schemaname name)
+    RETURNS text
+    AS $$
+    SELECT
+        parent
+    FROM
+        placeholder.migrations
+    WHERE
+        SCHEMA = schemaname
+        AND name = placeholder.latest_migration (schemaname);
+$$
+LANGUAGE SQL;
+
+-- find_version_schema finds a recent version schema for a given schema name.
+-- How recent is determined by the minDepth parameter: for a minDepth of 0, it
+-- returns the latest version schema, for a minDepth of 1, it returns the
+-- previous version schema, and so on.
+-- Only version schemas that exist in the database are considered; migrations
+-- without version schema (such as inferred migrations) are ignored.
+CREATE OR REPLACE FUNCTION find_version_schema (p_schema_name name, p_depth integer DEFAULT 0)
     RETURNS text
     AS $$
     WITH RECURSIVE ancestors AS (
         SELECT
             name,
+            COALESCE(migration ->> 'version_schema', name) AS version_schema,
             schema,
             parent,
-            migration_type,
             0 AS depth
         FROM
             placeholder.migrations
         WHERE
-            name = placeholder.latest_version (schemaname)
-            AND SCHEMA = schemaname
+            name = placeholder.latest_migration (p_schema_name)
+            AND SCHEMA = p_schema_name
         UNION ALL
         SELECT
             m.name,
+            COALESCE(m.migration ->> 'version_schema', m.name) AS version_schema,
             m.schema,
             m.parent,
-            m.migration_type,
             a.depth + 1
         FROM
             placeholder.migrations m
@@ -109,23 +142,42 @@ CREATE OR REPLACE FUNCTION placeholder.previous_version (schemaname name, includ
                 AND m.schema = a.schema
 )
         SELECT
-            a.name
+            a.version_schema
         FROM
             ancestors a
     WHERE
-        a.depth > 0
-        AND (includeInferred
-            OR (a.migration_type = 'pgroll'
-                AND EXISTS (
-                    SELECT
-                        s.schema_name
-                    FROM
-                        information_schema.schemata s
-                    WHERE
-                        s.schema_name = schemaname || '_' || a.name)))
+        EXISTS (
+            SELECT
+                1
+            FROM
+                information_schema.schemata s
+            WHERE
+                s.schema_name = p_schema_name || '_' || a.version_schema)
     ORDER BY
-        a.depth ASC
+        a.depth ASC OFFSET p_depth
     LIMIT 1;
+$$
+LANGUAGE SQL
+STABLE;
+
+-- previous_version returns the name of the previous version schema for a given
+-- schema name or NULL if there is no previous version schema.
+CREATE OR REPLACE FUNCTION previous_version (schemaname name)
+    RETURNS text
+    AS $$
+    SELECT
+        placeholder.find_version_schema (schemaname, 1);
+$$
+LANGUAGE SQL
+STABLE;
+
+-- latest_version returns the name of the latest version schema for a given
+-- schema name or NULL if there are no version schema.
+CREATE OR REPLACE FUNCTION latest_version (schemaname name)
+    RETURNS text
+    AS $$
+    SELECT
+        placeholder.find_version_schema (schemaname, 0);
 $$
 LANGUAGE SQL
 STABLE;
@@ -141,14 +193,14 @@ BEGIN
     SELECT
         json_build_object('name', schemaname, 'tables', (
                 SELECT
-                    COALESCE(json_object_agg(t.relname, jsonb_build_object('name', t.relname, 'oid', t.oid, 'comment', descr.description, 'columns', (
-                                    SELECT
-                                        COALESCE(json_object_agg(name, c), '{}'::json)
-                                FROM (
-                                    SELECT
-                                        attr.attname AS name, pg_get_expr(def.adbin, def.adrelid) AS default, NOT (attr.attnotnull
-                                        OR tp.typtype = 'd'
-                                        AND tp.typnotnull) AS nullable, CASE WHEN 'character varying'::regtype = ANY (ARRAY[attr.atttypid, tp.typelem]) THEN
+                    COALESCE(json_object_agg(t.relname, jsonb_strip_nulls (jsonb_build_object('name', t.relname, 'oid', t.oid, 'comment', descr.description, 'columns', (
+                                        SELECT
+                                            json_object_agg(name, c)
+                                    FROM (
+                                        SELECT
+                                            attr.attname AS name, pg_get_expr(def.adbin, def.adrelid) AS default, NOT (attr.attnotnull
+                                            OR tp.typtype = 'd'
+                                            AND tp.typnotnull) AS nullable, CASE WHEN 'character varying'::regtype = ANY (ARRAY[attr.atttypid, tp.typelem]) THEN
                                         REPLACE(format_type(attr.atttypid, attr.atttypmod), 'character varying', 'varchar')
                                     WHEN 'timestamp with time zone'::regtype = ANY (ARRAY[attr.atttypid, tp.typelem]) THEN
                                         REPLACE(format_type(attr.atttypid, attr.atttypmod), 'timestamp with time zone', 'timestamptz')
@@ -200,7 +252,7 @@ BEGIN
                                 AND NOT attr.attisdropped
                                 AND attr.attrelid = t.oid ORDER BY attr.attnum) c), 'primaryKey', (
                             SELECT
-                                COALESCE(json_agg(pg_attribute.attname), '[]'::json) AS primary_key_columns
+                                json_agg(pg_attribute.attname) AS primary_key_columns
                             FROM pg_index, pg_attribute
                             WHERE
                                 indrelid = t.oid
@@ -209,7 +261,7 @@ BEGIN
                                 AND pg_attribute.attnum = ANY (pg_index.indkey)
                                 AND indisprimary), 'indexes', (
                                 SELECT
-                                    COALESCE(json_object_agg(ix_details.name, json_build_object('name', ix_details.name, 'unique', ix_details.indisunique, 'exclusion', ix_details.indisexclusion, 'columns', ix_details.columns, 'predicate', ix_details.predicate, 'method', ix_details.method, 'definition', ix_details.definition)), '{}'::json)
+                                    json_object_agg(ix_details.name, json_build_object('name', ix_details.name, 'unique', ix_details.indisunique, 'exclusion', ix_details.indisexclusion, 'columns', ix_details.columns, 'predicate', ix_details.predicate, 'method', ix_details.method, 'definition', ix_details.definition))
                             FROM (
                                 SELECT
                                     replace(reverse(split_part(reverse(pi.indexrelid::regclass::text), '.', 1)), '"', '') AS name, pi.indisunique, pi.indisexclusion, array_agg(a.attname) AS columns, pg_get_expr(pi.indpred, t.oid) AS predicate, am.amname AS method, pg_get_indexdef(pi.indexrelid) AS definition
@@ -221,7 +273,7 @@ BEGIN
                                 WHERE
                                     indrelid = t.oid::regclass GROUP BY pi.indexrelid, pi.indisunique, pi.indpred, am.amname) AS ix_details), 'checkConstraints', (
                         SELECT
-                            COALESCE(json_object_agg(cc_details.conname, json_build_object('name', cc_details.conname, 'columns', cc_details.columns, 'definition', cc_details.definition, 'noInherit', cc_details.connoinherit)), '{}'::json)
+                            json_object_agg(cc_details.conname, json_build_object('name', cc_details.conname, 'columns', cc_details.columns, 'definition', cc_details.definition, 'noInherit', cc_details.connoinherit))
                         FROM (
                             SELECT
                                 cc_constraint.conname, array_agg(cc_attr.attname ORDER BY cc_constraint.conkey::int[]) AS columns, pg_get_constraintdef(cc_constraint.oid) AS definition, cc_constraint.connoinherit FROM pg_constraint AS cc_constraint
@@ -231,7 +283,7 @@ BEGIN
                                 cc_constraint.conrelid = t.oid
                                 AND cc_constraint.contype = 'c' GROUP BY cc_constraint.oid, cc_constraint.conname) AS cc_details), 'uniqueConstraints', (
                             SELECT
-                                COALESCE(json_object_agg(uc_details.conname, json_build_object('name', uc_details.conname, 'columns', uc_details.columns)), '{}'::json)
+                                json_object_agg(uc_details.conname, json_build_object('name', uc_details.conname, 'columns', uc_details.columns))
                             FROM (
                                 SELECT
                                     uc_constraint.conname, array_agg(uc_attr.attname ORDER BY uc_constraint.conkey::int[]) AS columns, pg_get_constraintdef(uc_constraint.oid) AS definition FROM pg_constraint AS uc_constraint
@@ -241,7 +293,7 @@ BEGIN
                                     uc_constraint.conrelid = t.oid
                                     AND uc_constraint.contype = 'u' GROUP BY uc_constraint.oid, uc_constraint.conname) AS uc_details), 'excludeConstraints', (
                                 SELECT
-                                    COALESCE(json_object_agg(xc_details.conname, json_build_object('name', xc_details.conname, 'columns', xc_details.columns, 'definition', xc_details.definition, 'predicate', xc_details.predicate, 'method', xc_details.method)), '{}'::json)
+                                    json_object_agg(xc_details.conname, json_build_object('name', xc_details.conname, 'columns', xc_details.columns, 'definition', xc_details.definition, 'predicate', xc_details.predicate, 'method', xc_details.method))
                                 FROM (
                                     SELECT
                                         xc_constraint.conname, array_agg(xc_attr.attname ORDER BY xc_constraint.conkey::int[]) AS columns, pg_get_expr(pi.indpred, t.oid) AS predicate, am.amname AS method, pg_get_constraintdef(xc_constraint.oid) AS definition FROM pg_constraint AS xc_constraint
@@ -254,7 +306,7 @@ BEGIN
                                         xc_constraint.conrelid = t.oid
                                         AND xc_constraint.contype = 'x' GROUP BY xc_constraint.oid, xc_constraint.conname, pi.indpred, pi.indexrelid, am.amname) AS xc_details), 'foreignKeys', (
                                     SELECT
-                                        COALESCE(json_object_agg(fk_details.conname, json_build_object('name', fk_details.conname, 'columns', fk_details.columns, 'referencedTable', fk_details.referencedTable, 'referencedColumns', fk_details.referencedColumns, 'matchType', fk_details.matchType, 'onDelete', fk_details.onDelete, 'onUpdate', fk_details.onUpdate)), '{}'::json)
+                                        json_object_agg(fk_details.conname, json_build_object('name', fk_details.conname, 'columns', fk_details.columns, 'referencedTable', fk_details.referencedTable, 'referencedColumns', fk_details.referencedColumns, 'matchType', fk_details.matchType, 'onDelete', fk_details.onDelete, 'onUpdate', fk_details.onUpdate))
                                     FROM (
                                         SELECT
                                             fk_info.conname AS conname, fk_info.columns AS columns, fk_info.relname AS referencedTable, array_agg(ref_attr.attname ORDER BY ref_attr.attname) AS referencedColumns, CASE WHEN fk_info.confmatchtype = 'f' THEN
@@ -294,14 +346,14 @@ BEGIN
                                                 AND fk_constraint.contype = 'f' GROUP BY fk_constraint.conrelid, fk_constraint.conname, fk_constraint.confrelid, fk_cl.relname, fk_constraint.confkey, fk_constraint.confmatchtype, fk_constraint.confdeltype, fk_constraint.confupdtype) AS fk_info
                                             INNER JOIN pg_attribute ref_attr ON ref_attr.attrelid = fk_info.confrelid
                                                 AND ref_attr.attnum = ANY (fk_info.confkey) -- join the columns of the referenced table
-                                        GROUP BY fk_info.conname, fk_info.conrelid, fk_info.columns, fk_info.confrelid, fk_info.confmatchtype, fk_info.confdeltype, fk_info.confupdtype, fk_info.relname) AS fk_details))), '{}'::json)
-                        FROM pg_class AS t
-                        INNER JOIN pg_namespace AS ns ON t.relnamespace = ns.oid
-                        LEFT JOIN pg_description AS descr ON t.oid = descr.objoid
-                            AND descr.objsubid = 0
-                        WHERE
-                            ns.nspname = schemaname
-                            AND t.relkind IN ('r', 'p') -- tables only (ignores views, materialized views & foreign tables)
+                                        GROUP BY fk_info.conname, fk_info.conrelid, fk_info.columns, fk_info.confrelid, fk_info.confmatchtype, fk_info.confdeltype, fk_info.confupdtype, fk_info.relname) AS fk_details)))), '{}'::json)
+                    FROM pg_class AS t
+                    INNER JOIN pg_namespace AS ns ON t.relnamespace = ns.oid
+                    LEFT JOIN pg_description AS descr ON t.oid = descr.objoid
+                        AND descr.objsubid = 0
+                    WHERE
+                        ns.nspname = schemaname
+                        AND t.relkind IN ('r', 'p') -- tables only (ignores views, materialized views & foreign tables)
 )) INTO tables;
     RETURN tables;
 END;
@@ -317,8 +369,8 @@ DECLARE
     schemaname text;
     migration_id text;
 BEGIN
-    -- Ignore migrations done by pgroll
-    IF (pg_catalog.current_setting('pgroll.internal', 'TRUE') <> 'TRUE') THEN
+    -- Ignore schema changes made by pgroll
+    IF (pg_catalog.current_setting('pgroll.internal', TRUE) = 'TRUE') THEN
         RETURN;
     END IF;
     IF tg_event = 'sql_drop' AND tg_tag = 'DROP SCHEMA' THEN
@@ -377,15 +429,39 @@ BEGIN
         AND migration_type = 'inferred'
         AND migration -> 'operations' -> 0 -> 'sql' ->> 'up' = current_query();
     -- Someone did a schema change without pgroll, include it in the history
-    SELECT
-        INTO migration_id pg_catalog.format('sql_%s', pg_catalog.substr(pg_catalog.md5(pg_catalog.random()::text), 0, 15));
+    -- Get the latest non-inferred migration name with microsecond timestamp for ordering
+    WITH latest_non_inferred AS (
+        SELECT
+            name
+        FROM
+            placeholder.migrations
+        WHERE
+            SCHEMA = schemaname
+            AND migration_type != 'inferred'
+        ORDER BY
+            created_at DESC
+        LIMIT 1
+)
+SELECT
+    INTO migration_id CASE WHEN EXISTS (
+        SELECT
+            1
+        FROM
+            latest_non_inferred) THEN
+        pg_catalog.format('%s_%s', (
+                SELECT
+                    name
+                FROM latest_non_inferred), pg_catalog.to_char(pg_catalog.clock_timestamp(), 'YYYYMMDDHH24MISSUS'))
+    ELSE
+        pg_catalog.format('00000_initial_%s', pg_catalog.to_char(pg_catalog.clock_timestamp(), 'YYYYMMDDHH24MISSUS'))
+    END;
     INSERT INTO placeholder.migrations (schema, name, migration, resulting_schema, done, parent, migration_type, created_at, updated_at)
-        VALUES (schemaname, migration_id, pg_catalog.json_build_object('name', migration_id, 'operations', (
-                    SELECT
-                        pg_catalog.json_agg(pg_catalog.json_build_object('sql', pg_catalog.json_build_object('up', pg_catalog.current_query()))))),
+        VALUES (schemaname, migration_id, pg_catalog.json_build_object('version_schema', 'sql_' || substring(md5(random()::text), 1, 8), 'operations', (
+                SELECT
+                    pg_catalog.json_agg(pg_catalog.json_build_object('sql', pg_catalog.json_build_object('up', pg_catalog.current_query()))))),
             placeholder.read_schema (schemaname),
             TRUE,
-            placeholder.latest_version (schemaname),
+            placeholder.latest_migration (schemaname),
             'inferred',
             statement_timestamp(),
             statement_timestamp());
